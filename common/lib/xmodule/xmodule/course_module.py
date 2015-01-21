@@ -184,40 +184,44 @@ class CourseFields(object):
         help=_("Enter the date you want to advertise as the course start date, if this date is different from the set start date. To advertise the set start date, enter null."),
         scope=Scope.settings
     )
-    grading_policy = Dict(help="Grading policy definition for this class",
-                          default={"GRADER": [
-                              {
-                                  "type": "Homework",
-                                  "min_count": 12,
-                                  "drop_count": 2,
-                                  "short_label": "HW",
-                                  "weight": 0.15
-                              },
-                              {
-                                  "type": "Lab",
-                                  "min_count": 12,
-                                  "drop_count": 2,
-                                  "weight": 0.15
-                              },
-                              {
-                                  "type": "Midterm Exam",
-                                  "short_label": "Midterm",
-                                  "min_count": 1,
-                                  "drop_count": 0,
-                                  "weight": 0.3
-                              },
-                              {
-                                  "type": "Final Exam",
-                                  "short_label": "Final",
-                                  "min_count": 1,
-                                  "drop_count": 0,
-                                  "weight": 0.4
-                              }
-                          ],
-                              "GRADE_CUTOFFS": {
-                                  "Pass": 0.5
-                              }},
-                          scope=Scope.content)
+    grading_policy = Dict(
+        help="Grading policy definition for this class",
+        default={
+            "GRADER": [
+                {
+                    "type": "Homework",
+                    "min_count": 12,
+                    "drop_count": 2,
+                    "short_label": "HW",
+                    "weight": 0.15,
+                },
+                {
+                    "type": "Lab",
+                    "min_count": 12,
+                    "drop_count": 2,
+                    "weight": 0.15,
+                },
+                {
+                    "type": "Midterm Exam",
+                    "short_label": "Midterm",
+                    "min_count": 1,
+                    "drop_count": 0,
+                    "weight": 0.3,
+                },
+                {
+                    "type": "Final Exam",
+                    "short_label": "Final",
+                    "min_count": 1,
+                    "drop_count": 0,
+                    "weight": 0.4,
+                }
+            ],
+            "GRADE_CUTOFFS": {
+                "Pass": 0.5,
+            },
+        },
+        scope=Scope.content
+    )
     show_calculator = Boolean(
         display_name=_("Show Calculator"),
         help=_("Enter true or false. When true, students can see the calculator in the course."),
@@ -256,7 +260,7 @@ class CourseFields(object):
     )
     discussion_topics = Dict(
         display_name=_("Discussion Topic Mapping"),
-        help=_("Enter discussion categories in the following format: \"CategoryName\": {\"id\": \"i4x-InstitutionName-CourseNumber-course-CourseRun\"}. For example, one discussion category may be \"Lydian Mode\": {\"id\": \"i4x-UniversityX-MUS101-course-2014_T1\"}."),
+        help=_("Enter discussion categories in the following format: \"CategoryName\": {\"id\": \"i4x-InstitutionName-CourseNumber-course-CourseRun\"}. For example, one discussion category may be \"Lydian Mode\": {\"id\": \"i4x-UniversityX-MUS101-course-2014_T1\"}. The \"id\" value for each category must be unique."),
         scope=Scope.settings
     )
     discussion_sort_alpha = Boolean(
@@ -285,7 +289,11 @@ class CourseFields(object):
         default=False,
         scope=Scope.settings
     )
-
+    video_upload_pipeline = Dict(
+        display_name=_("Video Upload Credentials"),
+        help=_("Enter the unique identifier for your course's video files provided by edX."),
+        scope=Scope.settings
+    )
     no_grade = Boolean(
         display_name=_("Course Not Graded"),
         help=_("Enter true or false. If true, the course will not be graded."),
@@ -910,6 +918,19 @@ class CourseDescriptor(CourseFields, SequenceDescriptor):
         return set(config.get("cohorted_discussions", []))
 
     @property
+    def always_cohort_inline_discussions(self):
+        """
+        This allow to change the default behavior of inline discussions cohorting. By
+        setting this to False, all inline discussions are non-cohorted unless their
+        ids are specified in cohorted_discussions.
+        """
+        config = self.cohort_config
+        if config is None:
+            return True
+
+        return bool(config.get("always_cohort_inline_discussions", True))
+
+    @property
     def is_newish(self):
         """
         Returns if the course has been flagged as new. If
@@ -1148,3 +1169,13 @@ class CourseDescriptor(CourseFields, SequenceDescriptor):
             return self.display_organization
 
         return self.org
+
+    @property
+    def video_pipeline_configured(self):
+        """
+        Returns whether the video pipeline advanced setting is configured for this course.
+        """
+        return (
+            self.video_upload_pipeline is not None and
+            'course_video_upload_token' in self.video_upload_pipeline
+        )

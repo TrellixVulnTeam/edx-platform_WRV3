@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Test for lms courseware app, module render unit
 """
@@ -30,14 +31,15 @@ from xmodule.modulestore.tests.django_utils import (
     TEST_DATA_XML_MODULESTORE
 )
 from courseware.tests.test_submitting_problems import TestSubmittingProblems
-from lms.lib.xblock.runtime import quote_slashes
+from lms.djangoapps.lms_xblock.runtime import quote_slashes
 from student.models import anonymous_id_for_user
 from xmodule.lti_module import LTIDescriptor
+
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.modulestore.django import modulestore
 from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
 from xmodule.modulestore.tests.factories import ItemFactory, CourseFactory, check_mongo_calls
-from xmodule.x_module import XModuleDescriptor, STUDENT_VIEW
+from xmodule.x_module import XModuleDescriptor, XModule, STUDENT_VIEW
 
 TEST_DATA_DIR = settings.COMMON_TEST_DATA_ROOT
 
@@ -47,6 +49,20 @@ class PureXBlock(XBlock):
     Pure XBlock to use in tests.
     """
     pass
+
+
+class EmptyXModule(XModule):  # pylint: disable=abstract-method
+    """
+    Empty XModule for testing with no dependencies.
+    """
+    pass
+
+
+class EmptyXModuleDescriptor(XModuleDescriptor):  # pylint: disable=abstract-method
+    """
+    Empty XModule for testing with no dependencies.
+    """
+    module_class = EmptyXModule
 
 
 @ddt.ddt
@@ -175,6 +191,44 @@ class ModuleRenderTestCase(ModuleStoreTestCase, LoginEnrollmentTestCase):
         response = self.client.post(dispatch_url, {'position': 2})
         self.assertEquals(403, response.status_code)
         self.assertEquals('Unauthenticated', response.content)
+
+    def test_missing_position_handler(self):
+        """
+        Test that sending POST request without or invalid position argument don't raise server error
+        """
+        self.client.login(username=self.mock_user.username, password="test")
+        dispatch_url = reverse(
+            'xblock_handler',
+            args=[
+                self.course_key.to_deprecated_string(),
+                quote_slashes(self.course_key.make_usage_key('videosequence', 'Toy_Videos').to_deprecated_string()),
+                'xmodule_handler',
+                'goto_position'
+            ]
+        )
+        response = self.client.post(dispatch_url)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(json.loads(response.content), {'success': True})
+
+        response = self.client.post(dispatch_url, {'position': ''})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(json.loads(response.content), {'success': True})
+
+        response = self.client.post(dispatch_url, {'position': '-1'})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(json.loads(response.content), {'success': True})
+
+        response = self.client.post(dispatch_url, {'position': "string"})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(json.loads(response.content), {'success': True})
+
+        response = self.client.post(dispatch_url, {'position': u"Φυσικά"})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(json.loads(response.content), {'success': True})
+
+        response = self.client.post(dispatch_url, {'position': None})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(json.loads(response.content), {'success': True})
 
     @ddt.data('pure', 'vertical')
     @XBlock.register_temp_plugin(PureXBlock, identifier='pure')
@@ -394,7 +448,7 @@ class TestTOC(ModuleStoreTestCase):
 
             with check_mongo_calls(toc_finds):
                 actual = render.toc_for_course(
-                    self.request.user, self.request, self.toy_course, self.chapter, None, self.field_data_cache
+                    self.request, self.toy_course, self.chapter, None, self.field_data_cache
                 )
         for toc_section in expected:
             self.assertIn(toc_section, actual)
@@ -432,7 +486,9 @@ class TestTOC(ModuleStoreTestCase):
                           'url_name': 'secret:magic', 'display_name': 'secret:magic'}])
 
             with check_mongo_calls(toc_finds):
-                actual = render.toc_for_course(self.request.user, self.request, self.toy_course, self.chapter, section, self.field_data_cache)
+                actual = render.toc_for_course(
+                    self.request, self.toy_course, self.chapter, section, self.field_data_cache
+                )
             for toc_section in expected:
                 self.assertIn(toc_section, actual)
 
@@ -1063,3 +1119,42 @@ class TestRebindModule(TestSubmittingProblems):
         module = self.get_module_for_user(self.anon_user)
         module.system.rebind_noauth_module_to_user(module, self.anon_user)
         self.assertFalse(psycho_handler.called)
+
+
+@ddt.ddt
+@override_settings(MODULESTORE=TEST_DATA_MOCK_MODULESTORE)
+class TestEventPublishing(ModuleStoreTestCase, LoginEnrollmentTestCase):
+    """
+    Tests of event publishing for both XModules and XBlocks.
+    """
+
+    def setUp(self):
+        """
+        Set up the course and user context
+        """
+        super(TestEventPublishing, self).setUp()
+
+        self.mock_user = UserFactory()
+        self.mock_user.id = 1
+        self.request_factory = RequestFactory()
+
+    @ddt.data('xblock', 'xmodule')
+    @XBlock.register_temp_plugin(PureXBlock, identifier='xblock')
+    @XBlock.register_temp_plugin(EmptyXModuleDescriptor, identifier='xmodule')
+    @patch.object(render, 'make_track_function')
+    def test_event_publishing(self, block_type, mock_track_function):
+        request = self.request_factory.get('')
+        request.user = self.mock_user
+        course = CourseFactory()
+        descriptor = ItemFactory(category=block_type, parent=course)
+        field_data_cache = FieldDataCache([course, descriptor], course.id, self.mock_user)  # pylint: disable=no-member
+        block = render.get_module(self.mock_user, request, descriptor.location, field_data_cache)
+
+        event_type = 'event_type'
+        event = {'event': 'data'}
+
+        block.runtime.publish(block, event_type, event)
+
+        mock_track_function.assert_called_once_with(request)
+
+        mock_track_function.return_value.assert_called_once_with(event_type, event)

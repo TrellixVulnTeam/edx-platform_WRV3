@@ -31,17 +31,18 @@ import lms.envs.common
 # Although this module itself may not use these imported variables, other dependent modules may.
 from lms.envs.common import (
     USE_TZ, TECH_SUPPORT_EMAIL, PLATFORM_NAME, BUGS_EMAIL, DOC_STORE_CONFIG, ALL_LANGUAGES, WIKI_ENABLED, MODULESTORE,
-    update_module_store_settings, ASSET_IGNORE_REGEX
+    update_module_store_settings, ASSET_IGNORE_REGEX, COPYRIGHT_YEAR
 )
 from path import path
 from warnings import simplefilter
 
-from lms.lib.xblock.mixin import LmsBlockMixin
-from dealer.git import git
+from lms.djangoapps.lms_xblock.mixin import LmsBlockMixin
+import dealer.git
 from xmodule.modulestore.edit_info import EditInfoMixin
 
 ############################ FEATURE CONFIGURATION #############################
-
+STUDIO_NAME = "Studio"
+STUDIO_SHORT_NAME = "Studio"
 FEATURES = {
     'USE_DJANGO_PIPELINE': True,
 
@@ -107,6 +108,14 @@ FEATURES = {
 
     # Modulestore to use for new courses
     'DEFAULT_STORE_FOR_NEW_COURSE': None,
+
+    # Turn off Video Upload Pipeline through Studio, by default
+    'ENABLE_VIDEO_UPLOAD_PIPELINE': False,
+
+    # Is this an edX-owned domain? (edx.org)
+    # for consistency in user-experience, keep the value of this feature flag
+    # in sync with the one in lms/envs/common.py
+    'IS_EDX_DOMAIN': False,
 }
 ENABLE_JASMINE = False
 
@@ -290,9 +299,19 @@ SERVER_EMAIL = 'devops@example.com'
 ADMINS = ()
 MANAGERS = ADMINS
 
+EDX_PLATFORM_REVISION = os.environ.get('EDX_PLATFORM_REVISION')
+
+if not EDX_PLATFORM_REVISION:
+    try:
+        # Get git revision of the current file
+        EDX_PLATFORM_REVISION = dealer.git.Backend(path=REPO_ROOT).revision
+    except TypeError:
+        # Not a git repository
+        EDX_PLATFORM_REVISION = 'unknown'
+
 # Static content
-STATIC_URL = '/static/' + git.revision + "/"
-STATIC_ROOT = ENV_ROOT / "staticfiles" / git.revision
+STATIC_URL = '/static/' + EDX_PLATFORM_REVISION + "/"
+STATIC_ROOT = ENV_ROOT / "staticfiles" / EDX_PLATFORM_REVISION
 
 STATICFILES_DIRS = [
     COMMON_ROOT / "static",
@@ -549,6 +568,14 @@ YOUTUBE = {
     },
 }
 
+############################# VIDEO UPLOAD PIPELINE #############################
+
+VIDEO_UPLOAD_PIPELINE = {
+    'BUCKET': '',
+    'ROOT_PATH': '',
+    'CONCURRENT_UPLOAD_LIMIT': 4,
+}
+
 ############################ APPS #####################################
 
 INSTALLED_APPS = (
@@ -575,7 +602,8 @@ INSTALLED_APPS = (
     'contentstore',
     'course_creators',
     'student',  # misleading name due to sharing with lms
-    'course_groups',  # not used in cms (yet), but tests run
+    'openedx.core.djangoapps.course_groups',  # not used in cms (yet), but tests run
+    'xblock_config',
 
     # Tracking
     'track',
@@ -607,7 +635,7 @@ INSTALLED_APPS = (
     'reverification',
 
     # User preferences
-    'user_api',
+    'openedx.core.djangoapps.user_api',
     'django_openid_auth',
 
     'embargo',
@@ -718,6 +746,16 @@ ADVANCED_SECURITY_CONFIG = {}
 SHIBBOLETH_DOMAIN_PREFIX = 'shib:'
 OPENID_DOMAIN_PREFIX = 'openid:'
 
+### Size of chunks into which asset uploads will be divided
+UPLOAD_CHUNK_SIZE_IN_MB = 10
+
+### Max size of asset uploads to GridFS
+MAX_ASSET_UPLOAD_FILE_SIZE_IN_MB = 10
+
+# FAQ url to direct users to if they upload
+# a file that exceeds the above size
+MAX_ASSET_UPLOAD_FILE_SIZE_URL = ""
+
 ################ ADVANCED_COMPONENT_TYPES ###############
 
 ADVANCED_COMPONENT_TYPES = [
@@ -737,10 +775,13 @@ ADVANCED_COMPONENT_TYPES = [
     'audio',  # Embed an audio file. See https://github.com/pmitros/AudioXBlock
     'recommender',  # Crowdsourced recommender. Prototype by dli&pmitros. Intended for roll-out in one place in one course.
     'profile',  # Prototype user profile XBlock. Used to test XBlock parameter passing. See https://github.com/pmitros/ProfileXBlock
+
     'split_test',
     'combinedopenended',
     'peergrading',
     'notes',
+    'schoolyourself_review',
+    'schoolyourself_lesson',
 ]
 
 # Adding components in this list will disable the creation of new problem for those
@@ -755,3 +796,5 @@ ADVANCED_PROBLEM_TYPES = [
         'boilerplate_name': None,
     }
 ]
+#date format the api will be formatting the datetime values
+API_DATE_FORMAT = '%Y-%m-%d'

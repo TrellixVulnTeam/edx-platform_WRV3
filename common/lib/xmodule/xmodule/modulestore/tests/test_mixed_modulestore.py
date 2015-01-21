@@ -663,25 +663,30 @@ class TestMixedModuleStore(CourseComparisonTest):
         self.assertTrue(self._has_changes(parent.location))
         self.assertTrue(self._has_changes(child.location))
 
-    @ddt.data('draft', 'split')
-    def test_has_changes_missing_child(self, default_ms):
+    @ddt.data(*itertools.product(
+        ('draft', 'split'),
+        (ModuleStoreEnum.Branch.draft_preferred, ModuleStoreEnum.Branch.published_only)
+    ))
+    @ddt.unpack
+    def test_has_changes_missing_child(self, default_ms, default_branch):
         """
         Tests that has_changes() does not throw an exception when a child doesn't exist.
         """
         self.initdb(default_ms)
 
-        # Create the parent and point it to a fake child
-        parent = self.store.create_item(
-            self.user_id,
-            self.course.id,
-            'vertical',
-            block_id='parent',
-        )
-        parent.children += [self.course.id.make_usage_key('vertical', 'does_not_exist')]
-        parent = self.store.update_item(parent, self.user_id)
+        with self.store.branch_setting(default_branch, self.course.id):
+            # Create the parent and point it to a fake child
+            parent = self.store.create_item(
+                self.user_id,
+                self.course.id,
+                'vertical',
+                block_id='parent',
+            )
+            parent.children += [self.course.id.make_usage_key('vertical', 'does_not_exist')]
+            parent = self.store.update_item(parent, self.user_id)
 
-        # Check the parent for changes should return True and not throw an exception
-        self.assertTrue(self.store.has_changes(parent))
+            # Check the parent for changes should return True and not throw an exception
+            self.assertTrue(self.store.has_changes(parent))
 
     # Draft
     #   Find: find parents (definition.children query), get parent, get course (fill in run?),
@@ -723,7 +728,7 @@ class TestMixedModuleStore(CourseComparisonTest):
     # Split:
     #    queries: active_versions, draft and published structures, definition (unnecessary)
     #    sends: update published (why?), draft, and active_versions
-    @ddt.data(('draft', 8, 2), ('split', 2, 2))
+    @ddt.data(('draft', 9, 2), ('split', 2, 2))
     @ddt.unpack
     def test_delete_private_vertical(self, default_ms, max_find, max_send):
         """
@@ -978,6 +983,41 @@ class TestMixedModuleStore(CourseComparisonTest):
             (child_to_delete_location, None, ModuleStoreEnum.RevisionOption.draft_preferred),
             (child_to_delete_location, None, ModuleStoreEnum.RevisionOption.published_only),
         ])
+
+    @ddt.data('draft')
+    def test_get_parent_location_draft(self, default_ms):
+        """
+        Test that "get_parent_location" method returns first published parent
+        for a draft component, if it has many possible parents (including
+        draft parents).
+        """
+        self.initdb(default_ms)
+        course_id = self.course_locations[self.MONGO_COURSEID].course_key
+
+        # create parented children
+        self._create_block_hierarchy()
+        self.store.publish(self.course.location, self.user_id)
+
+        mongo_store = self.store._get_modulestore_for_courseid(course_id)  # pylint: disable=protected-access
+        # add another parent (unit) "vertical_x1b" for problem "problem_x1a_1"
+        mongo_store.collection.update(
+            self.vertical_x1b.to_deprecated_son('_id.'),
+            {'$push': {'definition.children': unicode(self.problem_x1a_1)}}
+        )
+
+        # convert first parent (unit) "vertical_x1a" of problem "problem_x1a_1" to draft
+        self.store.convert_to_draft(self.vertical_x1a, self.user_id)
+        item = self.store.get_item(self.vertical_x1a)
+        self.assertTrue(self.store.has_published_version(item))
+
+        # now problem "problem_x1a_1" has 3 parents [vertical_x1a (draft),
+        # vertical_x1a (published), vertical_x1b (published)]
+        # check that "get_parent_location" method of draft branch returns first
+        # published parent "vertical_x1a" without raising "AssertionError" for
+        # problem location revision
+        with self.store.branch_setting(ModuleStoreEnum.Branch.draft_preferred, course_id):
+            parent = mongo_store.get_parent_location(self.problem_x1a_1)
+            self.assertEqual(parent, self.vertical_x1a)
 
     # Draft:
     #   Problem path:
@@ -1897,7 +1937,7 @@ class TestMixedModuleStore(CourseComparisonTest):
                     self.store, self.user_id, DATA_DIR, ['toy'], load_error_modules=False,
                     static_content_store=contentstore,
                     target_course_id=dest_course_key,
-                    create_new_course_if_not_present=True,
+                    create_course_if_not_present=True,
                 )
                 course_id = courses[0].id
                 # no need to verify course content here as test_cross_modulestore_import_export does that
@@ -1922,6 +1962,46 @@ class TestMixedModuleStore(CourseComparisonTest):
                 with self.store.branch_setting(ModuleStoreEnum.Branch.published_only, course_id):
                     self.assertTrue(self.store.has_item(vertical_loc))
 
+    @ddt.data(ModuleStoreEnum.Type.split)  # Need to fix and add ModuleStoreEnum.Type.mongo,
+    def test_delete_dag(self, default):
+        """
+        Test that deleting an element with more than one parent fully removes it from the course.
+        """
+        # set the default modulestore
+        with MongoContentstoreBuilder().build() as contentstore:
+            self.store = MixedModuleStore(
+                contentstore=contentstore,
+                create_modulestore_instance=create_modulestore_instance,
+                mappings={},
+                **self.OPTIONS
+            )
+            self.addCleanup(self.store.close_all_connections)
+            with self.store.default_store(default):
+                dest_course_key = self.store.make_course_key('a', 'course', 'course')
+                courses = import_from_xml(
+                    self.store, self.user_id, DATA_DIR, ['xml_dag'], load_error_modules=False,
+                    static_content_store=contentstore,
+                    target_course_id=dest_course_key,
+                    create_course_if_not_present=True,
+                )
+                course_id = courses[0].id
+                # ensure both parents point to the dag item
+                dag_item = course_id.make_usage_key('html', 'toyhtml')
+                one_parent = course_id.make_usage_key('vertical', 'vertical_test')
+                other_parent = course_id.make_usage_key('vertical', 'zeta')
+                with self.store.bulk_operations(course_id):
+                    # actually should test get_parent but it's not alphabetized yet
+                    self.assertEqual(self.store.get_parent_location(dag_item), one_parent)
+                    for parent_loc in [one_parent, other_parent]:
+                        parent = self.store.get_item(parent_loc)
+                        self.assertIn(dag_item, parent.children)
+                    # just testing draft branch assuming it doesn't matter which branch
+                    with self.store.branch_setting(ModuleStoreEnum.Branch.draft_preferred, course_id):
+                        self.store.delete_item(dag_item, self.user_id)
+                        for parent_loc in [one_parent, other_parent]:
+                            parent = self.store.get_item(parent_loc)
+                            self.assertNotIn(dag_item, parent.children)
+
     @ddt.data(ModuleStoreEnum.Type.mongo, ModuleStoreEnum.Type.split)
     def test_import_edit_import(self, default):
         """
@@ -1945,7 +2025,7 @@ class TestMixedModuleStore(CourseComparisonTest):
                     self.store, self.user_id, DATA_DIR, ['toy'], load_error_modules=False,
                     static_content_store=contentstore,
                     target_course_id=dest_course_key,
-                    create_new_course_if_not_present=True,
+                    create_course_if_not_present=True,
                 )
                 course_id = courses[0].id
                 # no need to verify course content here as test_cross_modulestore_import_export does that

@@ -2,7 +2,7 @@
 Tests for instructor.basic
 """
 
-from django.test import TestCase
+import json
 from student.models import CourseEnrollment
 from django.core.urlresolvers import reverse
 from mock import patch
@@ -17,12 +17,14 @@ from instructor_analytics.basic import (
     sale_record_features, sale_order_record_features, enrolled_students_features, course_registration_features,
     coupon_codes_features, AVAILABLE_FEATURES, STUDENT_FEATURES, PROFILE_FEATURES
 )
-from course_groups.tests.helpers import CohortFactory
-from course_groups.models import CourseUserGroup
+from openedx.core.djangoapps.course_groups.tests.helpers import CohortFactory
 from courseware.tests.factories import InstructorFactory
 from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
 from xmodule.modulestore.tests.factories import CourseFactory
-from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
+
+import datetime
+from django.db.models import Q
+import pytz
 
 
 class TestAnalyticsBasic(ModuleStoreTestCase):
@@ -35,6 +37,12 @@ class TestAnalyticsBasic(ModuleStoreTestCase):
         self.ces = tuple(CourseEnrollment.enroll(user, self.course_key)
                          for user in self.users)
         self.instructor = InstructorFactory(course_key=self.course_key)
+        for user in self.users:
+            user.profile.meta = json.dumps({
+                "position": "edX expert {}".format(user.id),
+                "company": "Open edX Inc {}".format(user.id),
+            })
+            user.profile.save()
 
     def test_enrolled_students_features_username(self):
         self.assertIn('username', AVAILABLE_FEATURES)
@@ -56,6 +64,19 @@ class TestAnalyticsBasic(ModuleStoreTestCase):
             self.assertIn(userreport['username'], [user.username for user in self.users])
             self.assertIn(userreport['email'], [user.email for user in self.users])
             self.assertIn(userreport['name'], [user.profile.name for user in self.users])
+
+    def test_enrolled_students_meta_features_keys(self):
+        """
+        Assert that we can query individual fields in the 'meta' field in the UserProfile
+        """
+        query_features = ('meta.position', 'meta.company')
+        with self.assertNumQueries(1):
+            userreports = enrolled_students_features(self.course_key, query_features)
+        self.assertEqual(len(userreports), len(self.users))
+        for userreport in userreports:
+            self.assertEqual(set(userreport.keys()), set(query_features))
+            self.assertIn(userreport['meta.position'], ["edX expert {}".format(user.id) for user in self.users])
+            self.assertIn(userreport['meta.company'], ["Open edX Inc {}".format(user.id) for user in self.users])
 
     def test_enrolled_students_features_keys_cohorted(self):
         course = CourseFactory.create(course_key=self.course_key)
@@ -221,8 +242,6 @@ class TestCourseSaleRecordsAnalyticsBasic(ModuleStoreTestCase):
             self.assertEqual(sale_order_record['company_contact_name'], order.company_contact_name)
             self.assertEqual(sale_order_record['company_contact_email'], order.company_contact_email)
             self.assertEqual(sale_order_record['customer_reference_number'], order.customer_reference_number)
-            self.assertEqual(sale_order_record['total_used_codes'], order.registrationcoderedemption_set.all().count())
-            self.assertEqual(sale_order_record['total_codes'], len(CourseRegistrationCode.objects.filter(order=order)))
             self.assertEqual(sale_order_record['unit_cost'], item.unit_cost)
             self.assertEqual(sale_order_record['list_price'], item.list_price)
             self.assertEqual(sale_order_record['status'], item.status)
@@ -264,7 +283,7 @@ class TestCourseRegistrationCodeAnalyticsBasic(ModuleStoreTestCase):
         order.save()
 
         registration_code_redemption = RegistrationCodeRedemption(
-            order=order, registration_code_id=1, redeemed_by=self.instructor
+            registration_code_id=1, redeemed_by=self.instructor
         )
         registration_code_redemption.save()
         registration_codes = CourseRegistrationCode.objects.all()
@@ -288,7 +307,7 @@ class TestCourseRegistrationCodeAnalyticsBasic(ModuleStoreTestCase):
 
     def test_coupon_codes_features(self):
         query_features = [
-            'course_id', 'percentage_discount', 'code_redeemed_count', 'description'
+            'course_id', 'percentage_discount', 'code_redeemed_count', 'description', 'expiration_date'
         ]
         for i in range(10):
             coupon = Coupon(
@@ -299,13 +318,29 @@ class TestCourseRegistrationCodeAnalyticsBasic(ModuleStoreTestCase):
                 is_active=True
             )
             coupon.save()
-        active_coupons = Coupon.objects.filter(course_id=self.course.id, is_active=True)
+        #now create coupons with the expiration dates
+        for i in range(5):
+            coupon = Coupon(
+                code='coupon{0}'.format(i), description='test_description', course_id=self.course.id,
+                percentage_discount='{0}'.format(i), created_by=self.instructor, is_active=True,
+                expiration_date=datetime.datetime.now(pytz.UTC) + datetime.timedelta(days=2)
+            )
+            coupon.save()
+
+        active_coupons = Coupon.objects.filter(
+            Q(course_id=self.course.id),
+            Q(is_active=True),
+            Q(expiration_date__gt=datetime.datetime.now(pytz.UTC)) |
+            Q(expiration_date__isnull=True)
+        )
         active_coupons_list = coupon_codes_features(query_features, active_coupons)
         self.assertEqual(len(active_coupons_list), len(active_coupons))
         for active_coupon in active_coupons_list:
             self.assertEqual(set(active_coupon.keys()), set(query_features))
             self.assertIn(active_coupon['percentage_discount'], [coupon.percentage_discount for coupon in active_coupons])
             self.assertIn(active_coupon['description'], [coupon.description for coupon in active_coupons])
+            if active_coupon['expiration_date']:
+                self.assertIn(active_coupon['expiration_date'], [coupon.display_expiry_date for coupon in active_coupons])
             self.assertIn(
                 active_coupon['course_id'],
                 [coupon.course_id.to_deprecated_string() for coupon in active_coupons]

@@ -1,6 +1,7 @@
 """
 Test for LMS instructor background task queue management
 """
+from mock import patch, Mock
 from bulk_email.models import CourseEmail, SEND_TO_ALL
 from courseware.tests.factories import UserFactory
 from xmodule.modulestore.exceptions import ItemNotFoundError
@@ -14,6 +15,7 @@ from instructor_task.api import (
     submit_delete_problem_state_for_all_students,
     submit_bulk_course_email,
     submit_calculate_students_features_csv,
+    submit_cohort_students,
 )
 
 from instructor_task.api_helper import AlreadyRunningError
@@ -157,6 +159,7 @@ class InstructorTaskModuleSubmitTest(InstructorTaskModuleTestCase):
         self._test_submit_task(submit_delete_problem_state_for_all_students)
 
 
+@patch('bulk_email.models.html_to_text', Mock(return_value='Mocking CourseEmail.text_message'))
 class InstructorTaskCourseSubmitTest(TestReportMixin, InstructorTaskCourseTestCase):
     """Tests API methods that involve the submission of course-based background tasks."""
 
@@ -199,5 +202,13 @@ class InstructorTaskCourseSubmitTest(TestReportMixin, InstructorTaskCourseTestCa
             self.create_task_request(self.instructor),
             self.course.id,
             features=[]
+        )
+        self._test_resubmission(api_call)
+
+    def test_submit_cohort_students(self):
+        api_call = lambda: submit_cohort_students(
+            self.create_task_request(self.instructor),
+            self.course.id,
+            file_name=u'filename.csv'
         )
         self._test_resubmission(api_call)

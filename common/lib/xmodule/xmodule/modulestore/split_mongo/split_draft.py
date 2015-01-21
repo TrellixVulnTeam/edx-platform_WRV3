@@ -251,6 +251,16 @@ class DraftVersioningModuleStore(SplitMongoModuleStore, ModuleStoreDraftAndPubli
         course_key = self._map_revision_to_branch(course_key)
         return super(DraftVersioningModuleStore, self).get_orphans(course_key, **kwargs)
 
+    def fix_not_found(self, course_key, user_id):
+        """
+        Fix any children which point to non-existent blocks in the course's published and draft branches
+        """
+        for branch in [ModuleStoreEnum.RevisionOption.published_only, ModuleStoreEnum.RevisionOption.draft_only]:
+            super(DraftVersioningModuleStore, self).fix_not_found(
+                self._map_revision_to_branch(course_key, branch),
+                user_id
+            )
+
     def has_changes(self, xblock):
         """
         Checks if the given block has unpublished changes
@@ -268,8 +278,10 @@ class DraftVersioningModuleStore(SplitMongoModuleStore, ModuleStoreDraftAndPubli
 
         def has_changes_subtree(block_key):
             draft_block = get_block(draft_course, block_key)
+            if draft_block is None:  # temporary fix for bad pointers TNL-1141
+                return True
             published_block = get_block(published_course, block_key)
-            if not published_block:
+            if published_block is None:
                 return True
 
             # check if the draft has changed since the published was created
@@ -476,6 +488,17 @@ class DraftVersioningModuleStore(SplitMongoModuleStore, ModuleStoreDraftAndPubli
             user_id, self._map_revision_to_branch(asset_key, ModuleStoreEnum.RevisionOption.draft_only),
             update_function
         )
+
+    def save_asset_metadata_list(self, asset_metadata_list, user_id, import_only=False):
+        """
+        Updates both the published and draft branches
+        """
+        asset_key = asset_metadata_list[0].asset_id
+        asset_metadata_list[0].asset_id = self._map_revision_to_branch(asset_key, ModuleStoreEnum.RevisionOption.published_only)
+        # if one call gets an exception, don't do the other call but pass on the exception
+        super(DraftVersioningModuleStore, self).save_asset_metadata_list(asset_metadata_list, user_id, import_only)
+        asset_metadata_list[0].asset_id = self._map_revision_to_branch(asset_key, ModuleStoreEnum.RevisionOption.draft_only)
+        super(DraftVersioningModuleStore, self).save_asset_metadata_list(asset_metadata_list, user_id, import_only)
 
     def _find_course_asset(self, asset_key):
         return super(DraftVersioningModuleStore, self)._find_course_asset(

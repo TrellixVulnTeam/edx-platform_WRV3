@@ -4,10 +4,15 @@ Unit tests for instructor.api methods.
 """
 import datetime
 import ddt
+import random
+import pytz
 import io
 import json
+import os
 import random
 import requests
+import shutil
+import tempfile
 from unittest import TestCase
 from urllib import quote
 
@@ -58,7 +63,7 @@ from .test_tools import msk_from_problem_urlname
 from ..views.tools import get_extended_due
 
 EXPECTED_CSV_HEADER = '"code","course_id","company_name","created_by","redeemed_by","invoice_id","purchaser","customer_reference_number","internal_reference"'
-EXPECTED_COUPON_CSV_HEADER = '"course_id","percentage_discount","code_redeemed_count","description"'
+EXPECTED_COUPON_CSV_HEADER = '"code","course_id","percentage_discount","code_redeemed_count","description"'
 
 # ddt data for test cases involving reports
 REPORTS_DATA = (
@@ -136,6 +141,7 @@ class TestCommonExceptions400(TestCase):
 
 
 @override_settings(MODULESTORE=TEST_DATA_MOCK_MODULESTORE)
+@patch('bulk_email.models.html_to_text', Mock(return_value='Mocking CourseEmail.text_message'))
 @patch.dict(settings.FEATURES, {'ENABLE_INSTRUCTOR_EMAIL': True, 'REQUIRE_COURSE_EMAIL_AUTH': False})
 class TestInstructorAPIDenyLevels(ModuleStoreTestCase, LoginEnrollmentTestCase):
     """
@@ -1074,23 +1080,53 @@ class TestInstructorAPIEnrollment(ModuleStoreTestCase, LoginEnrollmentTestCase):
         self.assertEqual(course_enrollment.mode, u'verified')
 
         # now re-enroll the student through the instructor dash
-        url = reverse(
-            'students_update_enrollment',
-            kwargs={'course_id': self.course.id.to_deprecated_string()},
-        )
-        params = {
-            'identifiers': self.enrolled_student.email,
-            'action': 'enroll',
-            'email_students': True,
-        }
-        response = self.client.post(url, params)
-        self.assertEqual(response.status_code, 200)
+        self._change_student_enrollment(self.enrolled_student, self.course, 'enroll')
 
         # affirm that the student is still in "verified" mode
         course_enrollment = CourseEnrollment.objects.get(
             user=self.enrolled_student, course_id=self.course.id
         )
         self.assertEqual(course_enrollment.mode, u"verified")
+
+    def test_unenroll_and_enroll_verified(self):
+        """
+        Test that unenrolling and enrolling a student from a verified track
+        results in that student being in an honor track
+        """
+        course_enrollment = CourseEnrollment.objects.get(
+            user=self.enrolled_student, course_id=self.course.id
+        )
+        # upgrade enrollment
+        course_enrollment.mode = u'verified'
+        course_enrollment.save()
+        self.assertEqual(course_enrollment.mode, u'verified')
+
+        self._change_student_enrollment(self.enrolled_student, self.course, 'unenroll')
+
+        self._change_student_enrollment(self.enrolled_student, self.course, 'enroll')
+
+        course_enrollment = CourseEnrollment.objects.get(
+            user=self.enrolled_student, course_id=self.course.id
+        )
+        self.assertEqual(course_enrollment.mode, u'honor')
+
+    def _change_student_enrollment(self, user, course, action):
+        """
+        Helper function that posts to 'students_update_enrollment' to change
+        a student's enrollment
+        """
+        url = reverse(
+            'students_update_enrollment',
+            kwargs={'course_id': course.id.to_deprecated_string()},
+        )
+        params = {
+            'identifiers': user.email,
+            'action': action,
+            'email_students': True,
+        }
+        response = self.client.post(url, params)
+        self.assertEqual(response.status_code, 200)
+        return response
 
 
 @ddt.ddt
@@ -1761,6 +1797,40 @@ class TestInstructorAPILevelsDataDump(ModuleStoreTestCase, LoginEnrollmentTestCa
         self.assertIn(item.status, response.content.split('\r\n')[1],)
         self.assertIn(coupon_redemption[0].coupon.code, response.content.split('\r\n')[1],)
 
+    def test_coupon_redeem_count_in_ecommerce_section(self):
+        """
+        Test that checks the redeem count in the instructor_dashboard coupon section
+        """
+        # add the coupon code for the course
+        coupon = Coupon(
+            code='test_code', description='test_description', course_id=self.course.id,
+            percentage_discount='10', created_by=self.instructor, is_active=True
+        )
+        coupon.save()
+        PaidCourseRegistration.add_to_order(self.cart, self.course.id)
+        # apply the coupon code to the item in the cart
+        resp = self.client.post(reverse('shoppingcart.views.use_code'), {'code': coupon.code})
+        self.assertEqual(resp.status_code, 200)
+
+        # URL for instructor dashboard
+        instructor_dashboard = reverse('instructor_dashboard', kwargs={'course_id': self.course.id.to_deprecated_string()})
+        # visit the instructor dashboard page and
+        # check that the coupon redeem count should be 0
+        resp = self.client.get(instructor_dashboard)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('Redeem Count', resp.content)
+        self.assertIn('<td>0</td>', resp.content)
+
+        # now make the payment of your cart items
+        self.cart.purchase()
+        # visit the instructor dashboard page and
+        # check that the coupon redeem count should be 1
+        resp = self.client.get(instructor_dashboard)
+        self.assertEqual(resp.status_code, 200)
+
+        self.assertIn('Redeem Count', resp.content)
+        self.assertIn('<td>1</td>', resp.content)
+
     def test_get_sale_records_features_csv(self):
         """
         Test that the response from get_sale_records is in csv format.
@@ -1794,30 +1864,6 @@ class TestInstructorAPILevelsDataDump(ModuleStoreTestCase, LoginEnrollmentTestCa
 
         for res in res_json['sale']:
             self.validate_sale_records_response(res, course_registration_code, self.sale_invoice_1, 0)
-
-    def test_get_sale_records_features_with_used_code(self):
-        """
-        Test that the response from get_sale_records is in json format and using one of the registration codes.
-        """
-        for i in range(5):
-            course_registration_code = CourseRegistrationCode(
-                code='qwerty{}'.format(i), course_id=self.course.id.to_deprecated_string(),
-                created_by=self.instructor, invoice=self.sale_invoice_1
-            )
-            course_registration_code.save()
-
-        PaidCourseRegistration.add_to_order(self.cart, self.course.id)
-
-        # now using registration code
-        self.client.post(reverse('shoppingcart.views.use_code'), {'code': 'qwerty0'})
-
-        url = reverse('get_sale_records', kwargs={'course_id': self.course.id.to_deprecated_string()})
-        response = self.client.get(url, {})
-        res_json = json.loads(response.content)
-        self.assertIn('sale', res_json)
-
-        for res in res_json['sale']:
-            self.validate_sale_records_response(res, course_registration_code, self.sale_invoice_1, 1)
 
     def test_get_sale_records_features_with_multiple_invoices(self):
         """
@@ -2185,6 +2231,7 @@ class TestInstructorAPIRegradeTask(ModuleStoreTestCase, LoginEnrollmentTestCase)
 
 
 @override_settings(MODULESTORE=TEST_DATA_MOCK_MODULESTORE)
+@patch('bulk_email.models.html_to_text', Mock(return_value='Mocking CourseEmail.text_message'))
 @patch.dict(settings.FEATURES, {'ENABLE_INSTRUCTOR_EMAIL': True, 'REQUIRE_COURSE_EMAIL_AUTH': False})
 class TestInstructorSendEmail(ModuleStoreTestCase, LoginEnrollmentTestCase):
     """
@@ -2971,7 +3018,8 @@ class TestCourseRegistrationCodes(ModuleStoreTestCase):
         for i in range(5):
             i += 1
             registration_code_redemption = RegistrationCodeRedemption(
-                order_id=i, registration_code_id=i, redeemed_by=self.instructor
+                registration_code_id=i,
+                redeemed_by=self.instructor
             )
             registration_code_redemption.save()
 
@@ -3153,7 +3201,8 @@ class TestCourseRegistrationCodes(ModuleStoreTestCase):
         for i in range(9):
             i += 13
             registration_code_redemption = RegistrationCodeRedemption(
-                order_id=i, registration_code_id=i, redeemed_by=self.instructor
+                registration_code_id=i,
+                redeemed_by=self.instructor
             )
             registration_code_redemption.save()
 
@@ -3284,8 +3333,190 @@ class TestCourseRegistrationCodes(ModuleStoreTestCase):
             )
             coupon.save()
 
+        #now create coupons with the expiration dates
+        for i in range(5):
+            coupon = Coupon(
+                code='coupon{0}'.format(i), description='test_description', course_id=self.course.id,
+                percentage_discount='{0}'.format(i), created_by=self.instructor, is_active=True,
+                expiration_date=datetime.datetime.now(pytz.UTC) + datetime.timedelta(days=2)
+            )
+            coupon.save()
+
         response = self.client.get(get_coupon_code_url)
         self.assertEqual(response.status_code, 200, response.content)
+        # filter all the coupons
+        for coupon in Coupon.objects.all():
+            self.assertIn('"{code}","{course_id}","{discount}","0","{description}","{expiration_date}"'.format(
+                code=coupon.code,
+                course_id=coupon.course_id,
+                discount=coupon.percentage_discount,
+                description=coupon.description,
+                expiration_date=coupon.display_expiry_date
+            ), response.content)
+
         self.assertEqual(response['Content-Type'], 'text/csv')
         body = response.content.replace('\r', '')
         self.assertTrue(body.startswith(EXPECTED_COUPON_CSV_HEADER))
+
+
+@override_settings(MODULESTORE=TEST_DATA_MOCK_MODULESTORE)
+class TestBulkCohorting(ModuleStoreTestCase):
+    """
+    Test adding users to cohorts in bulk via CSV upload.
+    """
+    def setUp(self):
+        super(TestBulkCohorting, self).setUp()
+        self.course = CourseFactory.create()
+        self.staff_user = StaffFactory(course_key=self.course.id)
+        self.non_staff_user = UserFactory.create()
+        self.tempdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if os.path.exists(self.tempdir):
+            shutil.rmtree(self.tempdir)
+
+    def call_add_users_to_cohorts(self, csv_data, suffix='.csv', method='POST'):
+        """
+        Call `add_users_to_cohorts` with a file generated from `csv_data`.
+        """
+        # this temporary file will be removed in `self.tearDown()`
+        __, file_name = tempfile.mkstemp(suffix=suffix, dir=self.tempdir)
+        with open(file_name, 'w') as file_pointer:
+            file_pointer.write(csv_data.encode('utf-8'))
+        with open(file_name, 'r') as file_pointer:
+            url = reverse('add_users_to_cohorts', kwargs={'course_id': unicode(self.course.id)})
+            if method == 'POST':
+                return self.client.post(url, {'uploaded-file': file_pointer})
+            elif method == 'GET':
+                return self.client.get(url, {'uploaded-file': file_pointer})
+
+    def expect_error_on_file_content(self, file_content, error, file_suffix='.csv'):
+        """
+        Verify that we get the error we expect for a given file input.
+        """
+        self.client.login(username=self.staff_user.username, password='test')
+        response = self.call_add_users_to_cohorts(file_content, suffix=file_suffix)
+        self.assertEqual(response.status_code, 400)
+        result = json.loads(response.content)
+        self.assertEqual(result['error'], error)
+
+    def verify_success_on_file_content(self, file_content, mock_store_upload, mock_cohort_task):
+        """
+        Verify that `addd_users_to_cohorts` successfully validates the
+        file content, uploads the input file, and triggers the
+        background task.
+        """
+        mock_store_upload.return_value = (None, 'fake_file_name.csv')
+        self.client.login(username=self.staff_user.username, password='test')
+        response = self.call_add_users_to_cohorts(file_content)
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(mock_store_upload.called)
+        self.assertTrue(mock_cohort_task.called)
+
+    def test_no_cohort_field(self):
+        """
+        Verify that we get a descriptive verification error when we haven't
+        included a cohort field in the uploaded CSV.
+        """
+        self.expect_error_on_file_content(
+            'username,email\n', "The file must contain a 'cohort' column containing cohort names."
+        )
+
+    def test_no_username_or_email_field(self):
+        """
+        Verify that we get a descriptive verification error when we haven't
+        included a username or email field in the uploaded CSV.
+        """
+        self.expect_error_on_file_content(
+            'cohort\n', "The file must contain a 'username' column, an 'email' column, or both."
+        )
+
+    def test_empty_csv(self):
+        """
+        Verify that we get a descriptive verification error when we haven't
+        included any data in the uploaded CSV.
+        """
+        self.expect_error_on_file_content(
+            '', "The file must contain a 'cohort' column containing cohort names."
+        )
+
+    def test_wrong_extension(self):
+        """
+        Verify that we get a descriptive verification error when we haven't
+        uploaded a file with a '.csv' extension.
+        """
+        self.expect_error_on_file_content(
+            '', "The file must end with the extension '.csv'.", file_suffix='.notcsv'
+        )
+
+    def test_non_staff_no_access(self):
+        """
+        Verify that we can't access the view when we aren't a staff user.
+        """
+        self.client.login(username=self.non_staff_user.username, password='test')
+        response = self.call_add_users_to_cohorts('')
+        self.assertEqual(response.status_code, 403)
+
+    def test_post_only(self):
+        """
+        Verify that we can't call the view when we aren't using POST.
+        """
+        self.client.login(username=self.staff_user.username, password='test')
+        response = self.call_add_users_to_cohorts('', method='GET')
+        self.assertEqual(response.status_code, 405)
+
+    @patch('instructor.views.api.instructor_task.api.submit_cohort_students')
+    @patch('instructor.views.api.store_uploaded_file')
+    def test_success_username(self, mock_store_upload, mock_cohort_task):
+        """
+        Verify that we store the input CSV and call a background task when
+        the CSV has username and cohort columns.
+        """
+        self.verify_success_on_file_content(
+            'username,cohort\nfoo_username,bar_cohort', mock_store_upload, mock_cohort_task
+        )
+
+    @patch('instructor.views.api.instructor_task.api.submit_cohort_students')
+    @patch('instructor.views.api.store_uploaded_file')
+    def test_success_email(self, mock_store_upload, mock_cohort_task):
+        """
+        Verify that we store the input CSV and call the cohorting background
+        task when the CSV has email and cohort columns.
+        """
+        self.verify_success_on_file_content(
+            'email,cohort\nfoo_email,bar_cohort', mock_store_upload, mock_cohort_task
+        )
+
+    @patch('instructor.views.api.instructor_task.api.submit_cohort_students')
+    @patch('instructor.views.api.store_uploaded_file')
+    def test_success_username_and_email(self, mock_store_upload, mock_cohort_task):
+        """
+        Verify that we store the input CSV and call the cohorting background
+        task when the CSV has username, email and cohort columns.
+        """
+        self.verify_success_on_file_content(
+            'username,email,cohort\nfoo_username,bar_email,baz_cohort', mock_store_upload, mock_cohort_task
+        )
+
+    @patch('instructor.views.api.instructor_task.api.submit_cohort_students')
+    @patch('instructor.views.api.store_uploaded_file')
+    def test_success_carriage_return(self, mock_store_upload, mock_cohort_task):
+        """
+        Verify that we store the input CSV and call the cohorting background
+        task when lines in the CSV are delimited by carriage returns.
+        """
+        self.verify_success_on_file_content(
+            'username,email,cohort\rfoo_username,bar_email,baz_cohort', mock_store_upload, mock_cohort_task
+        )
+
+    @patch('instructor.views.api.instructor_task.api.submit_cohort_students')
+    @patch('instructor.views.api.store_uploaded_file')
+    def test_success_carriage_return_line_feed(self, mock_store_upload, mock_cohort_task):
+        """
+        Verify that we store the input CSV and call the cohorting background
+        task when lines in the CSV are delimited by carriage returns and line
+        feeds.
+        """
+        self.verify_success_on_file_content(
+            'username,email,cohort\r\nfoo_username,bar_email,baz_cohort', mock_store_upload, mock_cohort_task
+        )

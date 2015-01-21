@@ -101,7 +101,7 @@ from . import provider
 # `AUTH_ENROLL_COURSE_ID_KEY` provides the course ID that a student
 # is trying to enroll in, used to generate analytics events
 # and auto-enroll students.
-from user_api.api import profile
+from openedx.core.djangoapps.user_api.api import profile
 
 AUTH_ENTRY_KEY = 'auth_entry'
 AUTH_REDIRECT_KEY = 'next'
@@ -535,6 +535,15 @@ def ensure_user_information(
     # once the A/B test completes. # pylint: disable=fixme
     if is_register_2 and user_unset:
         return redirect(_create_redirect_url(AUTH_DISPATCH_URLS[AUTH_ENTRY_REGISTER_2], strategy))
+
+    # If the user has a linked account, but has not yet activated
+    # we should send them to the login page.  The login page
+    # will tell them that they need to activate their account.
+    if is_register and user_inactive:
+        return redirect(_create_redirect_url(AUTH_DISPATCH_URLS[AUTH_ENTRY_LOGIN], strategy))
+
+    if is_register_2 and user_inactive:
+        return redirect(_create_redirect_url(AUTH_DISPATCH_URLS[AUTH_ENTRY_LOGIN_2], strategy))
 
 
 def _create_redirect_url(url, strategy):

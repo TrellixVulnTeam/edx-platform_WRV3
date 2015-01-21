@@ -16,9 +16,8 @@ from django.test.utils import override_settings
 
 from util.testing import UrlResetMixin
 from third_party_auth.tests.testutil import simulate_running_pipeline
-from user_api.api import account as account_api
-from user_api.api import profile as profile_api
-from util.bad_request_rate_limiter import BadRequestRateLimiter
+from openedx.core.djangoapps.user_api.api import account as account_api
+from openedx.core.djangoapps.user_api.api import profile as profile_api
 from xmodule.modulestore.tests.django_utils import (
     ModuleStoreTestCase, mixed_store_config
 )
@@ -433,13 +432,13 @@ class StudentAccountLoginAndRegistrationTest(ModuleStoreTestCase):
         expected_providers = [
             {
                 "name": "Facebook",
-                "iconClass": "icon-facebook",
+                "iconClass": "fa-facebook",
                 "loginUrl": self._third_party_login_url("facebook", "account_login"),
                 "registerUrl": self._third_party_login_url("facebook", "account_register")
             },
             {
                 "name": "Google",
-                "iconClass": "icon-google-plus",
+                "iconClass": "fa-google-plus",
                 "loginUrl": self._third_party_login_url("google-oauth2", "account_login"),
                 "registerUrl": self._third_party_login_url("google-oauth2", "account_register")
             }
@@ -466,7 +465,7 @@ class StudentAccountLoginAndRegistrationTest(ModuleStoreTestCase):
         expected_providers = [
             {
                 "name": "Facebook",
-                "iconClass": "icon-facebook",
+                "iconClass": "fa-facebook",
                 "loginUrl": self._third_party_login_url(
                     "facebook", "account_login",
                     course_id=unicode(course.id),
@@ -480,7 +479,7 @@ class StudentAccountLoginAndRegistrationTest(ModuleStoreTestCase):
             },
             {
                 "name": "Google",
-                "iconClass": "icon-google-plus",
+                "iconClass": "fa-google-plus",
                 "loginUrl": self._third_party_login_url(
                     "google-oauth2", "account_login",
                     course_id=unicode(course.id),
@@ -514,7 +513,7 @@ class StudentAccountLoginAndRegistrationTest(ModuleStoreTestCase):
         expected_providers = [
             {
                 "name": "Facebook",
-                "iconClass": "icon-facebook",
+                "iconClass": "fa-facebook",
                 "loginUrl": self._third_party_login_url(
                     "facebook", "account_login",
                     course_id=unicode(course.id),
@@ -528,7 +527,7 @@ class StudentAccountLoginAndRegistrationTest(ModuleStoreTestCase):
             },
             {
                 "name": "Google",
-                "iconClass": "icon-google-plus",
+                "iconClass": "fa-google-plus",
                 "loginUrl": self._third_party_login_url(
                     "google-oauth2", "account_login",
                     course_id=unicode(course.id),

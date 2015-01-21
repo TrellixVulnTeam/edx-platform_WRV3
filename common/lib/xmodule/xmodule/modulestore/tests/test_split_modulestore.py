@@ -132,168 +132,172 @@ class SplitModuleTest(unittest.TestCase):
                     },
                 },
             },
-            "revisions": [{
-                "user_id": "testassist@edx.org",
-                "update": {
-                    ("course", "head12345"): {
-                        "end": _date_field.from_json("2013-04-13T04:30"),
-                        "tabs": [
-                            {
-                                "type": "courseware"
-                            },
-                            {
-                                "type": "course_info",
-                                "name": "Course Info"
-                            },
-                            {
-                                "type": "discussion",
-                                "name": "Discussion"
-                            },
-                            {
-                                "type": "wiki",
-                                "name": "Wiki"
-                            },
-                            {
-                                "type": "static_tab",
-                                "name": "Syllabus",
-                                "url_slug": "01356a17b5924b17a04b7fc2426a3798"
-                            },
-                            {
-                                "type": "static_tab",
-                                "name": "Advice for Students",
-                                "url_slug": "57e9991c0d794ff58f7defae3e042e39"
-                            }
-                        ],
-                        "graceperiod": _time_delta_field.from_json("2 hours 0 minutes 0 seconds"),
-                        "grading_policy": {
-                            "GRADER": [
+            "revisions": [
+                {
+                    "user_id": "testassist@edx.org",
+                    "update": {
+                        ("course", "head12345"): {
+                            "end": _date_field.from_json("2013-04-13T04:30"),
+                            "tabs": [
                                 {
-                                    "min_count": 5,
-                                    "weight": 0.15,
-                                    "type": "Homework",
-                                    "drop_count": 1,
-                                    "short_label": "HWa"
+                                    "type": "courseware"
                                 },
                                 {
-                                    "short_label": "",
-                                    "min_count": 12,
-                                    "type": "Lab",
-                                    "drop_count": 2,
-                                    "weight": 0.15
+                                    "type": "course_info",
+                                    "name": "Course Info"
                                 },
                                 {
-                                    "short_label": "Midterm",
-                                    "min_count": 1,
-                                    "type": "Midterm Exam",
-                                    "drop_count": 0,
-                                    "weight": 0.3
+                                    "type": "discussion",
+                                    "name": "Discussion"
                                 },
                                 {
-                                    "short_label": "Final",
-                                    "min_count": 1,
-                                    "type": "Final Exam",
-                                    "drop_count": 0,
-                                    "weight": 0.4
+                                    "type": "wiki",
+                                    "name": "Wiki"
+                                },
+                                {
+                                    "type": "static_tab",
+                                    "name": "Syllabus",
+                                    "url_slug": "01356a17b5924b17a04b7fc2426a3798"
+                                },
+                                {
+                                    "type": "static_tab",
+                                    "name": "Advice for Students",
+                                    "url_slug": "57e9991c0d794ff58f7defae3e042e39"
                                 }
                             ],
-                            "GRADE_CUTOFFS": {
-                                "Pass": 0.55
-                            }
-                        },
-                    }}
-            },
-                {"user_id": "testassist@edx.org",
-                 "update":
-                    {("course", "head12345"): {
-                        "end": _date_field.from_json("2013-06-13T04:30"),
-                        "grading_policy": {
-                            "GRADER": [
-                                {
-                                    "min_count": 4,
-                                    "weight": 0.15,
-                                    "type": "Homework",
-                                    "drop_count": 2,
-                                    "short_label": "HWa"
-                                },
-                                {
-                                    "short_label": "",
-                                    "min_count": 12,
-                                    "type": "Lab",
-                                    "drop_count": 2,
-                                    "weight": 0.15
-                                },
-                                {
-                                    "short_label": "Midterm",
-                                    "min_count": 1,
-                                    "type": "Midterm Exam",
-                                    "drop_count": 0,
-                                    "weight": 0.3
-                                },
-                                {
-                                    "short_label": "Final",
-                                    "min_count": 1,
-                                    "type": "Final Exam",
-                                    "drop_count": 0,
-                                    "weight": 0.4
+                            "graceperiod": _time_delta_field.from_json("2 hours 0 minutes 0 seconds"),
+                            "grading_policy": {
+                                "GRADER": [
+                                    {
+                                        "min_count": 5,
+                                        "weight": 0.15,
+                                        "type": "Homework",
+                                        "drop_count": 1,
+                                        "short_label": "HWa"
+                                    },
+                                    {
+                                        "short_label": "",
+                                        "min_count": 12,
+                                        "type": "Lab",
+                                        "drop_count": 2,
+                                        "weight": 0.15
+                                    },
+                                    {
+                                        "short_label": "Midterm",
+                                        "min_count": 1,
+                                        "type": "Midterm Exam",
+                                        "drop_count": 0,
+                                        "weight": 0.3
+                                    },
+                                    {
+                                        "short_label": "Final",
+                                        "min_count": 1,
+                                        "type": "Final Exam",
+                                        "drop_count": 0,
+                                        "weight": 0.4
+                                    }
+                                ],
+                                "GRADE_CUTOFFS": {
+                                    "Pass": 0.55
                                 }
-                            ],
-                            "GRADE_CUTOFFS": {
-                                "Pass": 0.45
-                            }
+                            },
+                        }
+                    }
+                },
+                {
+                    "user_id": "testassist@edx.org",
+                    "update": {
+                        ("course", "head12345"): {
+                            "end": _date_field.from_json("2013-06-13T04:30"),
+                            "grading_policy": {
+                                "GRADER": [
+                                    {
+                                        "min_count": 4,
+                                        "weight": 0.15,
+                                        "type": "Homework",
+                                        "drop_count": 2,
+                                        "short_label": "HWa"
+                                    },
+                                    {
+                                        "short_label": "",
+                                        "min_count": 12,
+                                        "type": "Lab",
+                                        "drop_count": 2,
+                                        "weight": 0.15
+                                    },
+                                    {
+                                        "short_label": "Midterm",
+                                        "min_count": 1,
+                                        "type": "Midterm Exam",
+                                        "drop_count": 0,
+                                        "weight": 0.3
+                                    },
+                                    {
+                                        "short_label": "Final",
+                                        "min_count": 1,
+                                        "type": "Final Exam",
+                                        "drop_count": 0,
+                                        "weight": 0.4
+                                    }
+                                ],
+                                "GRADE_CUTOFFS": {
+                                    "Pass": 0.45
+                                }
+                            },
+                            "enrollment_start": _date_field.from_json("2013-01-01T05:00"),
+                            "enrollment_end": _date_field.from_json("2013-03-02T05:00"),
+                            "advertised_start": "Fall 2013",
+                        }
+                    },
+                    "create": [
+                        {
+                            "id": "chapter1",
+                            "parent": "head12345",
+                            "parent_type": "course",
+                            "category": "chapter",
+                            "fields": {
+                                "display_name": "Hercules"
+                            },
                         },
-                        "enrollment_start": _date_field.from_json("2013-01-01T05:00"),
-                        "enrollment_end": _date_field.from_json("2013-03-02T05:00"),
-                        "advertised_start": "Fall 2013",
-                    }},
-                 "create": [
-                     {
-                         "id": "chapter1",
-                         "parent": "head12345",
-                         "parent_type": "course",
-                         "category": "chapter",
-                         "fields": {
-                             "display_name": "Hercules"
-                         },
-                     },
-                     {
-                         "id": "chapter2",
-                         "parent": "head12345",
-                         "parent_type": "course",
-                         "category": "chapter",
-                         "fields": {
-                             "display_name": "Hera heckles Hercules"
-                         },
-                     },
-                     {
-                         "id": "chapter3",
-                         "parent": "head12345",
-                         "parent_type": "course",
-                         "category": "chapter",
-                         "fields": {
-                             "display_name": "Hera cuckolds Zeus"
-                         },
-                     },
-                     {
-                         "id": "problem1",
-                         "parent": "chapter3",
-                         "parent_type": "chapter",
-                         "category": "problem",
-                         "fields": {
-                             "display_name": "Problem 3.1",
-                             "graceperiod": _time_delta_field.from_json("4 hours 0 minutes 0 seconds"),
-                         },
-                     },
-                     {
-                         "id": "problem3_2",
-                         "parent": "chapter3",
-                         "parent_type": "chapter",
-                         "category": "problem",
-                         "fields": {
-                             "display_name": "Problem 3.2"
-                         },
-                     }
-                 ]
-                 },
+                        {
+                            "id": "chapter2",
+                            "parent": "head12345",
+                            "parent_type": "course",
+                            "category": "chapter",
+                            "fields": {
+                                "display_name": "Hera heckles Hercules"
+                            },
+                        },
+                        {
+                            "id": "chapter3",
+                            "parent": "head12345",
+                            "parent_type": "course",
+                            "category": "chapter",
+                            "fields": {
+                                "display_name": "Hera cuckolds Zeus"
+                            },
+                        },
+                        {
+                            "id": "problem1",
+                            "parent": "chapter3",
+                            "parent_type": "chapter",
+                            "category": "problem",
+                            "fields": {
+                                "display_name": "Problem 3.1",
+                                "graceperiod": _time_delta_field.from_json("4 hours 0 minutes 0 seconds"),
+                            },
+                        },
+                        {
+                            "id": "problem3_2",
+                            "parent": "chapter3",
+                            "parent_type": "chapter",
+                            "category": "problem",
+                            "fields": {
+                                "display_name": "Problem 3.2"
+                            },
+                        }
+                    ]
+                },
             ]
         },
         "testx.wonderful": {
@@ -358,49 +362,50 @@ class SplitModuleTest(unittest.TestCase):
                     }
                 },
             },
-            "revisions": [{
-                "user_id": "test@edx.org",
-                "update": {
-                    ("course", "head23456"): {
-                        "display_name": "The most wonderful course",
-                        "grading_policy": {
-                            "GRADER": [
-                                {
-                                    "min_count": 14,
-                                    "weight": 0.25,
-                                    "type": "Homework",
-                                    "drop_count": 1,
-                                    "short_label": "HWa"
-                                },
-                                {
-                                    "short_label": "",
-                                    "min_count": 12,
-                                    "type": "Lab",
-                                    "drop_count": 2,
-                                    "weight": 0.25
-                                },
-                                {
-                                    "short_label": "Midterm",
-                                    "min_count": 1,
-                                    "type": "Midterm Exam",
-                                    "drop_count": 0,
-                                    "weight": 0.2
-                                },
-                                {
-                                    "short_label": "Final",
-                                    "min_count": 1,
-                                    "type": "Final Exam",
-                                    "drop_count": 0,
-                                    "weight": 0.3
+            "revisions": [
+                {
+                    "user_id": "test@edx.org",
+                    "update": {
+                        ("course", "head23456"): {
+                            "display_name": "The most wonderful course",
+                            "grading_policy": {
+                                "GRADER": [
+                                    {
+                                        "min_count": 14,
+                                        "weight": 0.25,
+                                        "type": "Homework",
+                                        "drop_count": 1,
+                                        "short_label": "HWa"
+                                    },
+                                    {
+                                        "short_label": "",
+                                        "min_count": 12,
+                                        "type": "Lab",
+                                        "drop_count": 2,
+                                        "weight": 0.25
+                                    },
+                                    {
+                                        "short_label": "Midterm",
+                                        "min_count": 1,
+                                        "type": "Midterm Exam",
+                                        "drop_count": 0,
+                                        "weight": 0.2
+                                    },
+                                    {
+                                        "short_label": "Final",
+                                        "min_count": 1,
+                                        "type": "Final Exam",
+                                        "drop_count": 0,
+                                        "weight": 0.3
+                                    }
+                                ],
+                                "GRADE_CUTOFFS": {
+                                    "Pass": 0.45
                                 }
-                            ],
-                            "GRADE_CUTOFFS": {
-                                "Pass": 0.45
-                            }
-                        },
+                            },
+                        }
                     }
                 }
-            }
             ]
         },
         "guestx.contender": {
@@ -1552,6 +1557,40 @@ class TestCourseCreation(SplitModuleTest):
             modulestore().create_course(
                 dupe_course_key.org, dupe_course_key.course, dupe_course_key.run, user, BRANCH_NAME_DRAFT
             )
+
+    def test_bulk_ops_get_courses(self):
+        """
+        Test get_courses when some are created, updated, and deleted w/in a bulk operation
+        """
+        # create 3 courses before bulk operation
+        split_store = modulestore()
+
+        user = random.getrandbits(32)
+        to_be_created = split_store.make_course_key('new', 'created', 'course')
+        with split_store.bulk_operations(to_be_created):
+            split_store.create_course(
+                to_be_created.org, to_be_created.course, to_be_created.run, user, master_branch=BRANCH_NAME_DRAFT,
+            )
+
+            modified_course_loc = CourseLocator(org='testx', course='GreekHero', run="run", branch=BRANCH_NAME_DRAFT)
+            with split_store.bulk_operations(modified_course_loc):
+                modified_course = modulestore().get_course(modified_course_loc)
+                modified_course.advertised_start = 'coming soon to a theater near you'
+                split_store.update_item(modified_course, user)
+
+                to_be_deleted = split_store.make_course_key("guestx", "contender", "run")
+                with split_store.bulk_operations(to_be_deleted):
+                    split_store.delete_course(to_be_deleted, user)
+
+                    # now get_courses
+                    courses = split_store.get_courses(BRANCH_NAME_DRAFT)
+
+                    self.assertEqual(len(courses), 3)
+                    course_ids = [course.id.for_branch(None) for course in courses]
+                    self.assertNotIn(to_be_deleted, course_ids)
+                    self.assertIn(to_be_created, course_ids)
+                    fetched_modified = [course for course in courses if course.id == modified_course_loc][0]
+                    self.assertEqual(fetched_modified.advertised_start, modified_course.advertised_start)
 
 
 class TestInheritance(SplitModuleTest):

@@ -48,6 +48,7 @@ from edxmako.shortcuts import render_to_response, render_to_string
 from mako.exceptions import TopLevelLookupException
 
 from course_modes.models import CourseMode
+from shoppingcart.api import order_history
 from student.models import (
     Registration, UserProfile, PendingNameChange,
     PendingEmailChange, CourseEnrollment, unique_id_for_user,
@@ -68,7 +69,7 @@ from xmodule.modulestore import ModuleStoreEnum
 
 from collections import namedtuple
 
-from courseware.courses import get_courses, sort_by_announcement
+from courseware.courses import get_courses, sort_by_announcement, sort_by_start_date  # pylint: disable=import-error
 from courseware.access import has_access
 
 from django_comment_common.models import Role
@@ -78,8 +79,7 @@ import external_auth.views
 
 from bulk_email.models import Optout, CourseAuthorization
 import shoppingcart
-from shoppingcart.models import DonationConfiguration
-from user_api.models import UserPreference
+from openedx.core.djangoapps.user_api.models import UserPreference
 from lang_pref import LANGUAGE_KEY
 
 import track.views
@@ -104,8 +104,8 @@ from student.helpers import (
     check_verify_status_by_course
 )
 from xmodule.error_module import ErrorDescriptor
-from shoppingcart.models import CourseRegistrationCode
-from user_api.api import profile as profile_api
+from shoppingcart.models import DonationConfiguration, CourseRegistrationCode
+from openedx.core.djangoapps.user_api.api import profile as profile_api
 
 import analytics
 from eventtracking import tracker
@@ -146,7 +146,11 @@ def index(request, extra_context=None, user=AnonymousUser()):
         domain = request.META.get('HTTP_HOST')
 
     courses = get_courses(user, domain=domain)
-    courses = sort_by_announcement(courses)
+    if microsite.get_value("ENABLE_COURSE_SORTING_BY_START_DATE",
+                           settings.FEATURES["ENABLE_COURSE_SORTING_BY_START_DATE"]):
+        courses = sort_by_start_date(courses)
+    else:
+        courses = sort_by_announcement(courses)
 
     context = {'courses': courses}
 
@@ -564,13 +568,21 @@ def dashboard(request):
     #
     # If a course is not included in this dictionary,
     # there is no verification messaging to display.
-    if settings.FEATURES.get("SEPARATE_VERIFICATION_FROM_PAYMENT"):
+    #
+    # TODO (ECOM-188): After the A/B test completes, we can remove the check
+    # for the GET param and the session var.
+    # The A/B test framework will set the GET param for users in the experimental
+    # group; we then set the session var so downstream views can check this.
+    if settings.FEATURES.get("SEPARATE_VERIFICATION_FROM_PAYMENT") and request.GET.get('separate-verified', False):
+        request.session['separate-verified'] = True
         verify_status_by_course = check_verify_status_by_course(
             user,
             course_enrollment_pairs,
             all_course_modes
         )
     else:
+        if request.GET.get('disable-separate-verified', False) and 'separate-verified' in request.session:
+            del request.session['separate-verified']
         verify_status_by_course = {}
 
     cert_statuses = {
@@ -637,6 +649,9 @@ def dashboard(request):
         # otherwise, use the default language
         current_language = settings.LANGUAGE_DICT[settings.LANGUAGE_CODE]
 
+    # Populate the Order History for the side-bar.
+    order_history_list = order_history(user, course_org_filter=course_org_filter, org_filter_out_set=org_filter_out_set)
+
     context = {
         'enrollment_message': enrollment_message,
         'course_enrollment_pairs': course_enrollment_pairs,
@@ -666,6 +681,7 @@ def dashboard(request):
         'platform_name': settings.PLATFORM_NAME,
         'enrolled_courses_either_paid': enrolled_courses_either_paid,
         'provider_states': [],
+        'order_history_list': order_history_list
     }
 
     if third_party_auth.is_enabled():
@@ -696,9 +712,9 @@ def _create_recent_enrollment_message(course_enrollment_pairs, course_modes):
             {
                 "course_id": course.id,
                 "course_name": course.display_name,
-                "allow_donation": _allow_donation(course_modes, course.id)
+                "allow_donation": _allow_donation(course_modes, course.id, enrollment)
             }
-            for course in recently_enrolled_courses
+            for course, enrollment in recently_enrolled_courses
         ]
 
         return render_to_string(
@@ -722,14 +738,14 @@ def _get_recently_enrolled_courses(course_enrollment_pairs):
     seconds = DashboardConfiguration.current().recent_enrollment_time_delta
     time_delta = (datetime.datetime.now(UTC) - datetime.timedelta(seconds=seconds))
     return [
-        course for course, enrollment in course_enrollment_pairs
+        (course, enrollment) for course, enrollment in course_enrollment_pairs
         # If the enrollment has no created date, we are explicitly excluding the course
         # from the list of recent enrollments.
         if enrollment.is_active and enrollment.created > time_delta
     ]
 
 
-def _allow_donation(course_modes, course_id):
+def _allow_donation(course_modes, course_id, enrollment):
     """Determines if the dashboard will request donations for the given course.
 
     Check if donations are configured for the platform, and if the current course is accepting donations.
@@ -737,15 +753,14 @@ def _allow_donation(course_modes, course_id):
     Args:
         course_modes (dict): Mapping of course ID's to course mode dictionaries.
         course_id (str): The unique identifier for the course.
+        enrollment(CourseEnrollment): The enrollment object in which the user is enrolled
 
     Returns:
         True if the course is allowing donations.
 
     """
     donations_enabled = DonationConfiguration.current().enabled
-    is_verified_mode = CourseMode.has_verified_mode(course_modes[course_id])
-    has_payment_option = CourseMode.has_payment_options(course_id)
-    return donations_enabled and not is_verified_mode and not has_payment_option
+    return donations_enabled and enrollment.mode in course_modes[course_id] and course_modes[course_id][enrollment.mode].min_price == 0
 
 
 def try_change_enrollment(request):
@@ -1002,7 +1017,7 @@ def login_user(request, error=""):  # pylint: disable-msg=too-many-statements,un
                 _("Use your {platform_name} username and password to log into {platform_name} below, "
                   "and then link your {platform_name} account with {provider_name} from your dashboard.").format(
                       platform_name=settings.PLATFORM_NAME, provider_name=requested_provider.NAME
-                  )
+                )
                 + "<br/><br/>" +
                 _("If you don't have an {platform_name} account yet, click <strong>Register Now</strong> at the top of the page.").format(
                     platform_name=settings.PLATFORM_NAME
