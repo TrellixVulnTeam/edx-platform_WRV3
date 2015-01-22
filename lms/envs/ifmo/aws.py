@@ -8,6 +8,8 @@ DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 INSTALLED_APPS += (
     'ifmo_mod',
     'ifmo_sso',
-    'ifmo_crosscheck'
+    'ifmo_crosscheck',
+    'ifmo_edx_static',
+    'ifmo_ui',
 )
 
