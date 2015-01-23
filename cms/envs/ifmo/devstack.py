@@ -13,3 +13,4 @@ INSTALLED_APPS += (
     'ifmo_ui',
 )
 
+FEATURES['ALLOW_ALL_ADVANCED_COMPONENTS'] = True
