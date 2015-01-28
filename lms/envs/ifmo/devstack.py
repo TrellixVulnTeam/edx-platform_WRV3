@@ -1,8 +1,10 @@
 from ..devstack import *
 
+
 HTTPS = 'off'
 
-MEDIA_ROOT = '/edx/var/edxapp/uploads'
+MEDIA_ROOT = '/ifmo/var/uploads'
+MEDIA_URL = '/static/uploads/'
 DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 
 INSTALLED_APPS += (
