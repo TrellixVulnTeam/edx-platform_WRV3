@@ -13,5 +13,6 @@ INSTALLED_APPS += (
     'ifmo_crosscheck',
     'ifmo_edx_static',
     'ifmo_ui',
+    'ifmo_stats',
 )
 

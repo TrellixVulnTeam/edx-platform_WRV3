@@ -2,4 +2,5 @@
 -e git+http://vcs.de.ifmo.ru/scm/git/ifmo-edx-mod#egg=ifmo-edx-mod
 -e git+http://vcs.de.ifmo.ru/scm/git/ifmo-xblock-crosscheck#egg=ifmo-xblock-crosscheck
 -e git+http://vcs.de.ifmo.ru/scm/git/ifmo-edx-static#egg=ifmo-edx-static
+-e git+http://vcs.de.ifmo.ru/scm/git/ifmo-edx-stats#egg=ifmo-edx-stats
 
