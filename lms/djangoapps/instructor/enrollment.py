@@ -5,19 +5,28 @@ Does not include any access control, be sure to check access before calling.
 """
 
 import json
+import logging
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.urlresolvers import reverse
 from django.core.mail import send_mail
+from django.utils.translation import override as override_language
 
 from student.models import CourseEnrollment, CourseEnrollmentAllowed
 from courseware.models import StudentModule
 from edxmako.shortcuts import render_to_string
+from lang_pref import LANGUAGE_KEY
 
 from submissions import api as sub_api  # installed from the edx-submissions repository
 from student.models import anonymous_id_for_user
+from openedx.core.djangoapps.user_api.models import UserPreference
 
 from microsite_configuration import microsite
+from xmodule.modulestore.django import modulestore
+from xmodule.modulestore.exceptions import ItemNotFoundError
+
+
+log = logging.getLogger(__name__)
 
 
 class EmailEnrollmentState(object):
@@ -71,7 +80,17 @@ class EmailEnrollmentState(object):
         }
 
 
-def enroll_email(course_id, student_email, auto_enroll=False, email_students=False, email_params=None):
+def get_user_email_language(user):
+    """
+    Return the language most appropriate for writing emails to user. Returns
+    None if the preference has not been set, or if the user does not exist.
+    """
+    # Calling UserPreference directly instead of get_user_preference because the user requesting the
+    # information is not "user" and also may not have is_staff access.
+    return UserPreference.get_value(user, LANGUAGE_KEY)
+
+
+def enroll_email(course_id, student_email, auto_enroll=False, email_students=False, email_params=None, language=None):
     """
     Enroll a student by email.
 
@@ -81,12 +100,13 @@ def enroll_email(course_id, student_email, auto_enroll=False, email_students=Fal
         enrolled in the course automatically.
     `email_students` determines if student should be notified of action by email.
     `email_params` parameters used while parsing email templates (a `dict`).
+    `language` is the language used to render the email.
 
     returns two EmailEnrollmentState's
         representing state before and after the action.
     """
     previous_state = EmailEnrollmentState(course_id, student_email)
-
+    enrollment_obj = None
     if previous_state.user:
         # if the student is currently unenrolled, don't enroll them in their
         # previous mode
@@ -94,12 +114,12 @@ def enroll_email(course_id, student_email, auto_enroll=False, email_students=Fal
         if previous_state.enrollment:
             course_mode = previous_state.mode
 
-        CourseEnrollment.enroll_by_email(student_email, course_id, course_mode)
+        enrollment_obj = CourseEnrollment.enroll_by_email(student_email, course_id, course_mode)
         if email_students:
             email_params['message'] = 'enrolled_enroll'
             email_params['email_address'] = student_email
             email_params['full_name'] = previous_state.full_name
-            send_mail_to_student(student_email, email_params)
+            send_mail_to_student(student_email, email_params, language=language)
     else:
         cea, _ = CourseEnrollmentAllowed.objects.get_or_create(course_id=course_id, email=student_email)
         cea.auto_enroll = auto_enroll
@@ -107,33 +127,33 @@ def enroll_email(course_id, student_email, auto_enroll=False, email_students=Fal
         if email_students:
             email_params['message'] = 'allowed_enroll'
             email_params['email_address'] = student_email
-            send_mail_to_student(student_email, email_params)
+            send_mail_to_student(student_email, email_params, language=language)
 
     after_state = EmailEnrollmentState(course_id, student_email)
 
-    return previous_state, after_state
+    return previous_state, after_state, enrollment_obj
 
 
-def unenroll_email(course_id, student_email, email_students=False, email_params=None):
+def unenroll_email(course_id, student_email, email_students=False, email_params=None, language=None):
     """
     Unenroll a student by email.
 
     `student_email` is student's emails e.g. "foo@bar.com"
     `email_students` determines if student should be notified of action by email.
     `email_params` parameters used while parsing email templates (a `dict`).
+    `language` is the language used to render the email.
 
     returns two EmailEnrollmentState's
         representing state before and after the action.
     """
     previous_state = EmailEnrollmentState(course_id, student_email)
-
     if previous_state.enrollment:
         CourseEnrollment.unenroll_by_email(student_email, course_id)
         if email_students:
             email_params['message'] = 'enrolled_unenroll'
             email_params['email_address'] = student_email
             email_params['full_name'] = previous_state.full_name
-            send_mail_to_student(student_email, email_params)
+            send_mail_to_student(student_email, email_params, language=language)
 
     if previous_state.allowed:
         CourseEnrollmentAllowed.objects.get(course_id=course_id, email=student_email).delete()
@@ -141,7 +161,7 @@ def unenroll_email(course_id, student_email, email_students=False, email_params=
             email_params['message'] = 'allowed_unenroll'
             email_params['email_address'] = student_email
             # Since no User object exists for this student there is no "full_name" available.
-            send_mail_to_student(student_email, email_params)
+            send_mail_to_student(student_email, email_params, language=language)
 
     after_state = EmailEnrollmentState(course_id, student_email)
 
@@ -169,7 +189,7 @@ def send_beta_role_email(action, user, email_params):
     else:
         raise ValueError("Unexpected action received '{}' - expected 'add' or 'remove'".format(action))
 
-    send_mail_to_student(user.email, email_params)
+    send_mail_to_student(user.email, email_params, language=get_user_email_language(user))
 
 
 def reset_student_attempts(course_id, student, module_state_key, delete_module=False):
@@ -189,6 +209,19 @@ def reset_student_attempts(course_id, student, module_state_key, delete_module=F
         submissions.SubmissionError: unexpected error occurred while resetting the score in the submissions API.
 
     """
+    try:
+        # A block may have children. Clear state on children first.
+        block = modulestore().get_item(module_state_key)
+        if block.has_children:
+            for child in block.children:
+                try:
+                    reset_student_attempts(course_id, student, child, delete_module=delete_module)
+                except StudentModule.DoesNotExist:
+                    # If a particular child doesn't have any state, no big deal, as long as the parent does.
+                    pass
+    except ItemNotFoundError:
+        log.warning("Could not find %s in modulestore when attempting to reset attempts.", module_state_key)
+
     # Reset the student's score in the submissions API
     # Currently this is used only by open assessment (ORA 2)
     # We need to do this *before* retrieving the `StudentModule` model,
@@ -228,7 +261,7 @@ def _reset_module_attempts(studentmodule):
     studentmodule.save()
 
 
-def get_email_params(course, auto_enroll, secure=True):
+def get_email_params(course, auto_enroll, secure=True, course_key=None, display_name=None):
     """
     Generate parameters used when parsing email templates.
 
@@ -237,6 +270,8 @@ def get_email_params(course, auto_enroll, secure=True):
     """
 
     protocol = 'https' if secure else 'http'
+    course_key = course_key or course.id.to_deprecated_string()
+    display_name = display_name or course.display_name_with_default
 
     stripped_site_name = microsite.get_value(
         'SITE_NAME',
@@ -247,12 +282,12 @@ def get_email_params(course, auto_enroll, secure=True):
     registration_url = u'{proto}://{site}{path}'.format(
         proto=protocol,
         site=stripped_site_name,
-        path=reverse('student.views.register_user')
+        path=reverse('register_user')
     )
     course_url = u'{proto}://{site}{path}'.format(
         proto=protocol,
         site=stripped_site_name,
-        path=reverse('course_root', kwargs={'course_id': course.id.to_deprecated_string()})
+        path=reverse('course_root', kwargs={'course_id': course_key})
     )
 
     # We can't get the url to the course's About page if the marketing site is enabled.
@@ -261,7 +296,7 @@ def get_email_params(course, auto_enroll, secure=True):
         course_about_url = u'{proto}://{site}{path}'.format(
             proto=protocol,
             site=stripped_site_name,
-            path=reverse('about_course', kwargs={'course_id': course.id.to_deprecated_string()})
+            path=reverse('about_course', kwargs={'course_id': course_key})
         )
 
     is_shib_course = uses_shib(course)
@@ -271,6 +306,7 @@ def get_email_params(course, auto_enroll, secure=True):
         'site_name': stripped_site_name,
         'registration_url': registration_url,
         'course': course,
+        'display_name': display_name,
         'auto_enroll': auto_enroll,
         'course_url': course_url,
         'course_about_url': course_about_url,
@@ -279,7 +315,7 @@ def get_email_params(course, auto_enroll, secure=True):
     return email_params
 
 
-def send_mail_to_student(student, param_dict):
+def send_mail_to_student(student, param_dict, language=None):
     """
     Construct the email using templates and then send it.
     `student` is the student's email address (a `str`),
@@ -288,6 +324,7 @@ def send_mail_to_student(student, param_dict):
     [
         `site_name`: name given to edX instance (a `str`)
         `registration_url`: url for registration (a `str`)
+        `display_name` : display name of a course (a `str`)
         `course_id`: id of course (a `str`)
         `auto_enroll`: user input option (a `str`)
         `course_url`: url of course (a `str`)
@@ -297,12 +334,16 @@ def send_mail_to_student(student, param_dict):
         `is_shib_course`: (a `boolean`)
     ]
 
+    `language` is the language used to render the email. If None the language
+    of the currently-logged in user (that is, the user sending the email) will
+    be used.
+
     Returns a boolean indicating whether the email was sent successfully.
     """
 
     # add some helpers and microconfig subsitutions
-    if 'course' in param_dict:
-        param_dict['course_name'] = param_dict['course'].display_name_with_default
+    if 'display_name' in param_dict:
+        param_dict['course_name'] = param_dict['display_name']
 
     param_dict['site_name'] = microsite.get_value(
         'SITE_NAME',
@@ -349,8 +390,9 @@ def send_mail_to_student(student, param_dict):
 
     subject_template, message_template = email_template_dict.get(message_type, (None, None))
     if subject_template is not None and message_template is not None:
-        subject = render_to_string(subject_template, param_dict)
-        message = render_to_string(message_template, param_dict)
+        subject, message = render_message_to_string(
+            subject_template, message_template, param_dict, language=language
+        )
 
     if subject and message:
         # Remove leading and trailing whitespace from body
@@ -364,6 +406,28 @@ def send_mail_to_student(student, param_dict):
         )
 
         send_mail(subject, message, from_address, [student], fail_silently=False)
+
+
+def render_message_to_string(subject_template, message_template, param_dict, language=None):
+    """
+    Render a mail subject and message templates using the parameters from
+    param_dict and the given language. If language is None, the platform
+    default language is used.
+
+    Returns two strings that correspond to the rendered, translated email
+    subject and message.
+    """
+    with override_language(language):
+        return get_subject_and_message(subject_template, message_template, param_dict)
+
+
+def get_subject_and_message(subject_template, message_template, param_dict):
+    """
+    Return the rendered subject and message with the appropriate parameters.
+    """
+    subject = render_to_string(subject_template, param_dict)
+    message = render_to_string(message_template, param_dict)
+    return subject, message
 
 
 def uses_shib(course):

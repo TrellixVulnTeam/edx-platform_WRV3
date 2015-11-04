@@ -14,7 +14,7 @@ class CoursewarePage(CoursePage):
     url_path = "courseware/"
     xblock_component_selector = '.vert .xblock'
     section_selector = '.chapter'
-    subsection_selector = '.chapter ul li'
+    subsection_selector = '.chapter-content-container a'
 
     def is_browser_on_page(self):
         return self.q(css='body.courseware').present
@@ -34,11 +34,18 @@ class CoursewarePage(CoursePage):
         return len(self.q(css=self.subsection_selector))
 
     @property
+    def xblock_components(self):
+        """
+        Return the xblock components within the unit on the page.
+        """
+        return self.q(css=self.xblock_component_selector)
+
+    @property
     def num_xblock_components(self):
         """
         Return the number of rendered xblocks within the unit on the page
         """
-        return len(self.q(css=self.xblock_component_selector))
+        return len(self.xblock_components)
 
     def xblock_component_type(self, index=0):
         """
@@ -61,7 +68,14 @@ class CoursewarePage(CoursePage):
                 (default is 0)
 
         """
-        return self.q(css=self.xblock_component_selector).attrs('innerHTML')[index].strip()
+        # When Student Notes feature is enabled, it looks for the content inside
+        # `.edx-notes-wrapper-content` element (Otherwise, you will get an
+        # additional html related to Student Notes).
+        element = self.q(css='{} .edx-notes-wrapper-content'.format(self.xblock_component_selector))
+        if element.first:
+            return element.attrs('innerHTML')[index].strip()
+        else:
+            return self.q(css=self.xblock_component_selector).attrs('innerHTML')[index].strip()
 
     def tooltips_displayed(self):
         """
@@ -73,3 +87,68 @@ class CoursewarePage(CoursePage):
                 return False
 
         return True
+
+    @property
+    def course_license(self):
+        """
+        Returns the course license text, if present. Else returns None.
+        """
+        element = self.q(css="#content .container-footer .course-license")
+        if element.is_present():
+            return element.text[0]
+        return None
+
+    def get_active_subsection_url(self):
+        """
+        return the url of the active subsection in the left nav
+        """
+        return self.q(css='.chapter-content-container .menu-item.active a').attrs('href')[0]
+
+    @property
+    def can_start_proctored_exam(self):
+        """
+        Returns True if the timed/proctored exam timer bar is visible on the courseware.
+        """
+        return self.q(css='button.start-timed-exam[data-start-immediately="false"]').is_present()
+
+    def start_timed_exam(self):
+        """
+        clicks the start this timed exam link
+        """
+        self.q(css=".xblock-student_view .timed-exam .start-timed-exam").first.click()
+        self.wait_for_element_presence(".proctored_exam_status .exam-timer", "Timer bar")
+
+    def start_proctored_exam(self):
+        """
+        clicks the start this timed exam link
+        """
+        self.q(css='button.start-timed-exam[data-start-immediately="false"]').first.click()
+
+        # Wait for the unique exam code to appear.
+        # elf.wait_for_element_presence(".proctored-exam-code", "unique exam code")
+
+    @property
+    def is_timer_bar_present(self):
+        """
+        Returns True if the timed/proctored exam timer bar is visible on the courseware.
+        """
+        return self.q(css=".proctored_exam_status .exam-timer").is_present()
+
+
+class CoursewareSequentialTabPage(CoursePage):
+    """
+    Courseware Sequential page
+    """
+
+    def __init__(self, browser, course_id, chapter, subsection, position):
+        super(CoursewareSequentialTabPage, self).__init__(browser, course_id)
+        self.url_path = "courseware/{}/{}/{}".format(chapter, subsection, position)
+
+    def is_browser_on_page(self):
+        return self.q(css='nav.sequence-list-wrapper').present
+
+    def get_selected_tab_content(self):
+        """
+        return the body of the sequential currently selected
+        """
+        return self.q(css='#seq_content .xblock').text[0]

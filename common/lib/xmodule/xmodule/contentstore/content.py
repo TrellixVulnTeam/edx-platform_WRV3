@@ -105,7 +105,7 @@ class StaticContent(object):
         if course_key is None:
             return None
 
-        assert(isinstance(course_key, CourseKey))
+        assert isinstance(course_key, CourseKey)
         placeholder_id = uuid.uuid4().hex
         # create a dummy asset location with a fake but unique name. strip off the name, and return it
         url_path = StaticContent.serialize_asset_key_with_slash(
@@ -220,7 +220,7 @@ class ContentStore(object):
     def find(self, filename):
         raise NotImplementedError
 
-    def get_all_content_for_course(self, course_key, start=0, maxresults=-1, sort=None):
+    def get_all_content_for_course(self, course_key, start=0, maxresults=-1, sort=None, filter_params=None):
         '''
         Returns a list of static assets for a course, followed by the total number of assets.
         By default all assets are returned, but start and maxresults can be provided to limit the query.

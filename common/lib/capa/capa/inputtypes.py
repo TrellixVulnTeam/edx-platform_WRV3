@@ -69,7 +69,7 @@ registry = TagRegistry()  # pylint: disable=invalid-name
 class Status(object):
     """
     Problem status
-    attributes: classname, display_name
+    attributes: classname, display_name, display_tooltip
     """
     css_classes = {
         # status: css class
@@ -77,7 +77,7 @@ class Status(object):
         'incomplete': 'incorrect',
         'queued': 'processing',
     }
-    __slots__ = ('classname', '_status', 'display_name')
+    __slots__ = ('classname', '_status', 'display_name', 'display_tooltip')
 
     def __init__(self, status, gettext_func=unicode):
         self.classname = self.css_classes.get(status, status)
@@ -85,12 +85,23 @@ class Status(object):
         names = {
             'correct': _('correct'),
             'incorrect': _('incorrect'),
+            'partially-correct': _('partially correct'),
             'incomplete': _('incomplete'),
             'unanswered': _('unanswered'),
             'unsubmitted': _('unanswered'),
             'queued': _('processing'),
         }
+        tooltips = {
+            # Translators: these are tooltips that indicate the state of an assessment question
+            'correct': _('This is correct.'),
+            'incorrect': _('This is incorrect.'),
+            'partially-correct': _('This is partially correct.'),
+            'unanswered': _('This is unanswered.'),
+            'unsubmitted': _('This is unanswered.'),
+            'queued': _('This is being processed.'),
+        }
         self.display_name = names.get(status, unicode(status))
+        self.display_tooltip = tooltips.get(status, u'')
         self._status = status or ''
 
     def __str__(self):
@@ -213,6 +224,7 @@ class InputTypeBase(object):
         self.hint = feedback.get('hint', '')
         self.hintmode = feedback.get('hintmode', None)
         self.input_state = state.get('input_state', {})
+        self.answervariable = state.get("answervariable", None)
 
         # put hint above msg if it should be displayed
         if self.hintmode == 'always':
@@ -310,6 +322,8 @@ class InputTypeBase(object):
             (a, v) for (a, v) in self.loaded_attributes.iteritems() if a in self.to_render
         )
         context.update(self._extra_context())
+        if self.answervariable:
+            context.update({'answervariable': self.answervariable})
         return context
 
     def _extra_context(self):
@@ -483,15 +497,17 @@ class ChoiceGroup(InputTypeBase):
         _ = i18n.ugettext
 
         for choice in element:
-            if choice.tag != 'choice':
-                msg = u"[capa.inputtypes.extract_choices] {error_message}".format(
-                    # Translators: '<choice>' is a tag name and should not be translated.
-                    error_message=_("Expected a <choice> tag; got {given_tag} instead").format(
-                        given_tag=choice.tag
+            if choice.tag == 'choice':
+                choices.append((choice.get("name"), stringify_children(choice)))
+            else:
+                if choice.tag != 'compoundhint':
+                    msg = u'[capa.inputtypes.extract_choices] {error_message}'.format(
+                        # Translators: '<choice>' and '<compoundhint>' are tag names and should not be translated.
+                        error_message=_('Expected a <choice> or <compoundhint> tag; got {given_tag} instead').format(
+                            given_tag=choice.tag
+                        )
                     )
-                )
-                raise Exception(msg)
-            choices.append((choice.get("name"), stringify_children(choice)))
+                    raise Exception(msg)
         return choices
 
     def get_user_visible_answer(self, internal_answer):
@@ -882,7 +898,7 @@ class MatlabInput(CodeInput):
         Right now, we only want this button to show up when a problem has not been
         checked.
         """
-        if self.status in ['correct', 'incorrect']:
+        if self.status in ['correct', 'incorrect', 'partially-correct']:
             return False
         else:
             return True
@@ -1013,8 +1029,6 @@ class Schematic(InputTypeBase):
         ]
 
     def _extra_context(self):
-        """
-        """
         context = {
             'setup_script': '{static_url}js/capa/schematicinput.js'.format(
                 static_url=self.capa_system.STATIC_URL),
@@ -1202,9 +1216,11 @@ class FormulaEquationInput(InputTypeBase):
 
     Example:
 
-    <formulaequationinput size="50" label="Enter the equation for motion"/>
+    <formulaequationinput size="50" label="Enter the equation for motion" />
 
     options: size -- width of the textbox.
+             trailing_text -- text to show after the input textbox when
+                              rendered, same as textline (useful for units)
     """
 
     template = "formulaequationinput.html"
@@ -1219,6 +1235,7 @@ class FormulaEquationInput(InputTypeBase):
             Attribute('size', '20'),
             Attribute('inline', False),
             Attribute('label', ''),
+            Attribute('trailing_text', ''),
         ]
 
     def _extra_context(self):
@@ -1407,8 +1424,6 @@ class EditAMoleculeInput(InputTypeBase):
                 Attribute('missing', None)]
 
     def _extra_context(self):
-        """
-        """
         context = {
             'applet_loader': '{static_url}js/capa/editamolecule.js'.format(
                 static_url=self.capa_system.STATIC_URL),
@@ -1443,8 +1458,6 @@ class DesignProtein2dInput(InputTypeBase):
                 ]
 
     def _extra_context(self):
-        """
-        """
         context = {
             'applet_loader': '{static_url}js/capa/design-protein-2d.js'.format(
                 static_url=self.capa_system.STATIC_URL),
@@ -1479,8 +1492,6 @@ class EditAGeneInput(InputTypeBase):
                 ]
 
     def _extra_context(self):
-        """
-            """
         context = {
             'applet_loader': '{static_url}js/capa/edit-a-gene.js'.format(
                 static_url=self.capa_system.STATIC_URL),
@@ -1565,7 +1576,7 @@ class AnnotationInput(InputTypeBase):
     def _unpack(self, json_value):
         """ Unpacks the json input state into a dict. """
         d = json.loads(json_value)
-        if type(d) != dict:
+        if not isinstance(d, dict):
             d = {}
 
         comment_value = d.get('comment', '')

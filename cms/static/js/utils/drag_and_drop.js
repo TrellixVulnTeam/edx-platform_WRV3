@@ -1,4 +1,4 @@
-define(["jquery", "jquery.ui", "underscore", "gettext", "js/views/feedback_notification", "draggabilly",
+define(["jquery", "jquery.ui", "underscore", "gettext", "common/js/components/views/feedback_notification", "draggabilly",
     "js/utils/module"],
     function ($, ui, _, gettext, NotificationView, Draggabilly, ModuleUtils) {
 
@@ -289,7 +289,7 @@ define(["jquery", "jquery.ui", "underscore", "gettext", "js/views/feedback_notif
 
                 };
                 saving = new NotificationView.Mini({
-                    title: gettext('Saving&hellip;')
+                    title: gettext('Saving')
                 });
                 saving.show();
                 element.addClass('was-dropped');

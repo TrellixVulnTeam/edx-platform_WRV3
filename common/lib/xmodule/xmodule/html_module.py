@@ -1,21 +1,25 @@
-import copy
-from fs.errors import ResourceNotFoundError
-import logging
 import os
 import sys
+import re
+import copy
+import logging
+import textwrap
 from lxml import etree
-from path import path
-
+from path import Path as path
+from fs.errors import ResourceNotFoundError
 from pkg_resources import resource_string
-from xblock.fields import Scope, String, Boolean, List
+
+import dogstats_wrapper as dog_stats_api
+from xmodule.util.misc import escape_html_characters
+from xmodule.contentstore.content import StaticContent
 from xmodule.editing_module import EditingDescriptor
+from xmodule.edxnotes_utils import edxnotes
 from xmodule.html_checker import check_html
 from xmodule.stringify import stringify_children
-from xmodule.x_module import XModule
+from xmodule.x_module import XModule, DEPRECATION_VSCOMPAT_EVENT
 from xmodule.xml_module import XmlDescriptor, name_to_pathname
-import textwrap
-from xmodule.contentstore.content import StaticContent
 from xblock.core import XBlock
+from xblock.fields import Scope, String, Boolean, List
 
 log = logging.getLogger("edx.courseware")
 
@@ -51,7 +55,10 @@ class HtmlFields(object):
     )
 
 
-class HtmlModule(HtmlFields, XModule):
+class HtmlModuleMixin(HtmlFields, XModule):
+    """
+    Attributes and methods used by HtmlModules internally.
+    """
     js = {
         'coffee': [
             resource_string(__name__, 'js/src/javascript_loader.coffee'),
@@ -72,7 +79,17 @@ class HtmlModule(HtmlFields, XModule):
         return self.data
 
 
-class HtmlDescriptor(HtmlFields, XmlDescriptor, EditingDescriptor):
+@edxnotes
+class HtmlModule(HtmlModuleMixin):
+    """
+    Module for putting raw html in a course
+    """
+    @XBlock.supports("multi_device")
+    def student_view(self, context):
+        return super(HtmlModule, self).student_view(context)
+
+
+class HtmlDescriptor(HtmlFields, XmlDescriptor, EditingDescriptor):  # pylint: disable=abstract-method
     """
     Module for putting raw html in a course
     """
@@ -80,6 +97,7 @@ class HtmlDescriptor(HtmlFields, XmlDescriptor, EditingDescriptor):
     module_class = HtmlModule
     filename_extension = "xml"
     template_dir_name = "html"
+    show_in_read_only_mode = True
 
     js = {'coffee': [resource_string(__name__, 'js/src/html/edit.coffee')]}
     js_module_name = "HTMLEditingDescriptor"
@@ -89,6 +107,12 @@ class HtmlDescriptor(HtmlFields, XmlDescriptor, EditingDescriptor):
     # are being edited in the cms
     @classmethod
     def backcompat_paths(cls, path):
+
+        dog_stats_api.increment(
+            DEPRECATION_VSCOMPAT_EVENT,
+            tags=["location:html_descriptor_backcompat_paths"]
+        )
+
         if path.endswith('.html.xml'):
             path = path[:-9] + '.html'  # backcompat--look for html instead of xml
         if path.endswith('.html.html'):
@@ -113,7 +137,7 @@ class HtmlDescriptor(HtmlFields, XmlDescriptor, EditingDescriptor):
         Show them only if use_latex_compiler is set to True in
         course settings.
         """
-        return ('latex' not in template['template_id'] or course.use_latex_compiler)
+        return 'latex' not in template['template_id'] or course.use_latex_compiler
 
     def get_context(self):
         """
@@ -178,6 +202,12 @@ class HtmlDescriptor(HtmlFields, XmlDescriptor, EditingDescriptor):
             # again in the correct format.  This should go away once the CMS is
             # online and has imported all current (fall 2012) courses from xml
             if not system.resources_fs.exists(filepath):
+
+                dog_stats_api.increment(
+                    DEPRECATION_VSCOMPAT_EVENT,
+                    tags=["location:html_descriptor_load_definition"]
+                )
+
                 candidates = cls.backcompat_paths(filepath)
                 # log.debug("candidates = {0}".format(candidates))
                 for candidate in candidates:
@@ -236,9 +266,38 @@ class HtmlDescriptor(HtmlFields, XmlDescriptor, EditingDescriptor):
 
     @property
     def non_editable_metadata_fields(self):
+        """
+        `use_latex_compiler` should not be editable in the Studio settings editor.
+        """
         non_editable_fields = super(HtmlDescriptor, self).non_editable_metadata_fields
         non_editable_fields.append(HtmlDescriptor.use_latex_compiler)
         return non_editable_fields
+
+    def index_dictionary(self):
+        xblock_body = super(HtmlDescriptor, self).index_dictionary()
+        # Removing script and style
+        html_content = re.sub(
+            re.compile(
+                r"""
+                    <script>.*?</script> |
+                    <style>.*?</style>
+                """,
+                re.DOTALL |
+                re.VERBOSE),
+            "",
+            self.data
+        )
+        html_content = escape_html_characters(html_content)
+        html_body = {
+            "html_content": html_content,
+            "display_name": self.display_name,
+        }
+        if "content" in xblock_body:
+            xblock_body["content"].update(html_body)
+        else:
+            xblock_body["content"] = html_body
+        xblock_body["content_type"] = "Text"
+        return xblock_body
 
 
 class AboutFields(object):
@@ -255,7 +314,7 @@ class AboutFields(object):
 
 
 @XBlock.tag("detached")
-class AboutModule(AboutFields, HtmlModule):
+class AboutModule(AboutFields, HtmlModuleMixin):
     """
     Overriding defaults but otherwise treated as HtmlModule.
     """
@@ -292,7 +351,7 @@ class StaticTabFields(object):
 
 
 @XBlock.tag("detached")
-class StaticTabModule(StaticTabFields, HtmlModule):
+class StaticTabModule(StaticTabFields, HtmlModuleMixin):
     """
     Supports the field overrides
     """
@@ -326,7 +385,7 @@ class CourseInfoFields(object):
 
 
 @XBlock.tag("detached")
-class CourseInfoModule(CourseInfoFields, HtmlModule):
+class CourseInfoModule(CourseInfoFields, HtmlModuleMixin):
     """
     Just to support xblock field overrides
     """
